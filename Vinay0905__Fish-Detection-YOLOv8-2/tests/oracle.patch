@@ -1,0 +1,13 @@
+diff --git a/api.py b/api.py
+new file mode 100644
+index 0000000..2a26878
+--- /dev/null
++++ b/api.py
+@@ -0,0 +1,7 @@
++from fastapi import FastAPI
++
++app = FastAPI()
++
++@app.get("/")
++async def root():
++    return {"message": "Hello World"}

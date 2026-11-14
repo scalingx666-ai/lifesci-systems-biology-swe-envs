@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/klamt-lab__straindesign-104"
+description = "Release workflow: build the Anaconda package in a job of its own, with Micromamba"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "straindesign",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "klamt-lab/straindesign"
+ref = "71439045c2d83d94e6609cc9262f1c39253f0f0f"
+reference = "https://github.com/klamt-lab/straindesign/pull/104"
+source_access = "auto"
+built_at = "2026-11-14T07:03:56.008759+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:b9de6d3951801d4bdf8000f156b05b77b456831e23da504c3608dd2434519d8c"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-05T16:10:11Z"
+diff_format = "unified"
+context_files = [
+    ".github/workflows/python-publish.yml",
+    "Update_version.md",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 43
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

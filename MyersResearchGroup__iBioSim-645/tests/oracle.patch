@@ -1,0 +1,78 @@
+diff --git a/.gitignore b/.gitignore
+index 92006f752..ebf91cd50 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -13,6 +13,7 @@ bin/iBioSim.jar
+ .settings/
+ **/.project
+ /.metadata/
++.sdkmanrc
+ 
+ # intellij artefacts
+ out
+diff --git a/analysis/src/main/java/edu/utah/ece/async/ibiosim/analysis/Run.java b/analysis/src/main/java/edu/utah/ece/async/ibiosim/analysis/Run.java
+index 3b4a41381..9435f989c 100644
+--- a/analysis/src/main/java/edu/utah/ece/async/ibiosim/analysis/Run.java
++++ b/analysis/src/main/java/edu/utah/ece/async/ibiosim/analysis/Run.java
+@@ -876,9 +876,11 @@ public void run () {
+ 				  String line = br.readLine ();
+ 				  if (line == null) break;
+ 				  if (name.equals("stdin")) {
++					  boolean isProgress = false;
+ 					  try {
+ 						  if (line.contains("Time")) {
+ 							  time = Double.parseDouble(line.substring(line.indexOf('=') + 1, line.length()));
++							  isProgress = true;
+ 							  if (oldTime > time) {
+ 								  runNum++;
+ 							  }
+@@ -900,7 +902,7 @@ public void run () {
+ 					  if (parent!=null) {
+ 						  message.setInteger(prog);
+ 						  parent.send(RequestType.REQUEST_PROGRESS, message);
+-					  } else{
++					  } else if (!isProgress) {
+ 						  System.out.println(line);
+ 					  }
+ 				  } else {
+diff --git a/dataModels/pom.xml b/dataModels/pom.xml
+index 405e768c1..85104059f 100644
+--- a/dataModels/pom.xml
++++ b/dataModels/pom.xml
+@@ -24,7 +24,7 @@
+ 		<repository>
+ 			<id>osgeo</id>
+ 			<name>osgeo</name>
+-			<url>http://download.osgeo.org/webdav/geotools/</url>
++			<url>https://download.osgeo.org/webdav/geotools/</url>
+ 		</repository>
+ 		<repository>
+ 			<id>alfresco</id>
+@@ -82,6 +82,27 @@
+ 			<version>1.7-SNAPSHOT</version>
+ 		</dependency>
+ 
++		<dependency>
++			<groupId>org.apache.httpcomponents</groupId>
++			<artifactId>httpclient</artifactId>
++			<version>4.5.3</version>
++		</dependency>
++		<dependency>
++			<groupId>org.apache.httpcomponents</groupId>
++			<artifactId>httpcore</artifactId>
++			<version>4.4.6</version>
++		</dependency>
++		<dependency>
++			<groupId>com.google.code.gson</groupId>
++			<artifactId>gson</artifactId>
++			<version>2.7</version>
++		</dependency>
++		<dependency>
++			<groupId>com.google.guava</groupId>
++			<artifactId>guava</artifactId>
++			<version>18.0</version>
++		</dependency>
++
+ 		<dependency>
+ 			<groupId>net.sf.trove4j</groupId>
+ 			<artifactId>trove4j</artifactId>

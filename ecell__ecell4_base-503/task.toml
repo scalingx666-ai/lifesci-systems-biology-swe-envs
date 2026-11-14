@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/ecell__ecell4_base-503"
+description = "Add macOS arm64 wheel build guide and ignore rules"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "ecell4_base",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "ecell/ecell4_base"
+ref = "1b62efcb19a86261113f71c9aa3239add929c8d2"
+reference = "https://github.com/ecell/ecell4_base/pull/503"
+source_access = "auto"
+built_at = "2026-11-14T07:03:27.510913+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:cfcde68026c3ca8ef15346b7f79ba68f778e25aba36e94e347bbd93285fa875e"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-03-24T15:53:19Z"
+diff_format = "unified"
+context_files = [
+    ".gitignore",
+    "README.md",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 31
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

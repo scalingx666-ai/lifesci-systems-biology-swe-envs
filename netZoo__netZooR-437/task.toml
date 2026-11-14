@@ -1,0 +1,66 @@
+version = "1.0"
+
+[task]
+name = "default/netZoo__netZooR-437"
+description = "Expanded statistics reporting in SEAHORSE for phenotype-phenotype, ph…"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "netZooR",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "netZoo/netZooR"
+ref = "df65cc1e8aa1aad40a7454235f0410836ed20443"
+reference = "https://github.com/netZoo/netZooR/pull/437"
+source_access = "auto"
+built_at = "2026-11-14T07:01:40.225212+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:776fc8fb3f84e5809a85ba25356b0de3ce8128a3e55243ac94119253ad41c88b"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-09-11T17:10:05Z"
+diff_format = "unified"
+context_files = [
+    "DESCRIPTION",
+    "R/SEAHORSE.R",
+    "man/writePhenotypeGeneAssociations.Rd",
+    "man/writePhenotypePhenotypeAssociations.Rd",
+    "tests/testthat/test-seahorse.R",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 622
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

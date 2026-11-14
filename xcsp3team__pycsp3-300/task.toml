@@ -1,0 +1,68 @@
+version = "1.0"
+
+[task]
+name = "default/xcsp3team__pycsp3-300"
+description = "Constants of PyCSP3 (ConstraintDummyConstant) and element on a list of identical integers (#281)"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "pycsp3",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "xcsp3team/pycsp3"
+ref = "fbe0611a579e35ab5d6548c44a93066afb8df72f"
+reference = "https://github.com/xcsp3team/pycsp3/pull/300"
+source_access = "auto"
+built_at = "2026-11-14T07:02:28.248299+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:63b3e2ffab67ee3628820234e143b1c2bf5a9d6ba8df16cf0ffba6a7b6a307d8"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-28T12:07:30Z"
+diff_format = "unified"
+context_files = [
+    "pycsp3/classes/main/constraints.py",
+    "pycsp3/functions.py",
+    "pycsp3/tests/harness.py",
+    "pycsp3/tests/test_constants.py",
+    "pycsp3/tests/test_constraints_global_element.py",
+    "pycsp3/tools/curser.py",
+    "pycsp3/tools/inspector.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 301
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

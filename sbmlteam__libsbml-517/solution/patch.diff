@@ -1,0 +1,41 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index bc126375b5..70586b2493 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -537,11 +537,19 @@ INSTALL(EXPORT ${LIBSBML_LIBRARY}-static-targets
+ 
+ if (${CMAKE_VERSION} VERSION_GREATER 2.8.7)
+ 
+-# When only the static libsbml is built, its package file asks for the static zlib, as a zlib
+-# that was built static-only has no shared target to find.
++# The exported targets link to what ZLIB::ZLIB is an alias of. When that is a target exported as
++# ZLIB::ZLIBSTATIC, only the zlib package file defines that name, so the package file asks for it.
+ set(LIBSBML_ZLIB_FIND_ARGS "")
+-if (LIBSBML_SKIP_SHARED_LIBRARY)
+-  set(LIBSBML_ZLIB_FIND_ARGS COMPONENTS static)
++if (TARGET ZLIB::ZLIB)
++  get_target_property(_libsbml_zlib_real ZLIB::ZLIB ALIASED_TARGET)
++  if (_libsbml_zlib_real)
++    get_target_property(_libsbml_zlib_export_name ${_libsbml_zlib_real} EXPORT_NAME)
++    if (_libsbml_zlib_export_name STREQUAL "ZLIBSTATIC")
++      set(LIBSBML_ZLIB_FIND_ARGS CONFIG COMPONENTS static)
++    endif()
++  endif()
++  unset(_libsbml_zlib_real)
++  unset(_libsbml_zlib_export_name)
+ endif()
+ 
+ CONFIGURE_PACKAGE_CONFIG_FILE(
+diff --git a/src/libsbml-static-config.cmake.in b/src/libsbml-static-config.cmake.in
+index b33ff53766..5964da6d9e 100644
+--- a/src/libsbml-static-config.cmake.in
++++ b/src/libsbml-static-config.cmake.in
+@@ -13,7 +13,7 @@ foreach (library @LIBSBML_LIBS@ @EXTRA_LIBS@)
+       message(VERBOSE "Looking for dependent library: ${DEPENDENT_NAME}")
+       set(_libsbml_dependency_args)
+       if (DEPENDENT_NAME STREQUAL "ZLIB")
+-        # Empty, unless only the static libsbml was built; then it needs the static zlib.
++        # Empty, unless libsbml was built against a zlib that exports ZLIB::ZLIBSTATIC.
+         set(_libsbml_dependency_args @LIBSBML_ZLIB_FIND_ARGS@)
+       endif()
+       find_dependency(${DEPENDENT_NAME} ${_libsbml_dependency_args})

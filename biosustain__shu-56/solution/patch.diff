@@ -1,0 +1,548 @@
+diff --git a/ggshu/ggshu/__init__.py b/ggshu/ggshu/__init__.py
+index 0011a86..692e311 100644
+--- a/ggshu/ggshu/__init__.py
++++ b/ggshu/ggshu/__init__.py
+@@ -4,6 +4,7 @@
+ from .geoms import GeomKde as geom_kde
+ from .geoms import GeomMetabolite as geom_metabolite
+ from .geoms import GeomBoxPoint as geom_boxpoint
++from .geoms import GeomColumn as geom_column
+ from .ggdata import PlotData as ggmap
+ from .jupyter import Shu
+ 
+diff --git a/ggshu/ggshu/aes.py b/ggshu/ggshu/aes.py
+index 81a2f79..c836667 100644
+--- a/ggshu/ggshu/aes.py
++++ b/ggshu/ggshu/aes.py
+@@ -13,6 +13,8 @@ def aes(
+     color: Optional[str] = None,
+     size: Optional[str] = None,
+     stack: Optional[str] = None,
++    ymin: Optional[str] = None,
++    ymax: Optional[str] = None,
+ ) -> Aesthetics:
+     """Map from dataframe variables to grammar graphics variables."""
+     # instead of using **kwargs, we specify the exact accepted aes
+@@ -23,6 +25,8 @@ def aes(
+         "metabolite": metabolite,
+         "condition": condition,
+         "y": y,
++        "ymin": ymin,
++        "ymax": ymax,
+         "color": color,
+         "size": size,
+         "stack": stack,
+diff --git a/ggshu/ggshu/geoms.py b/ggshu/ggshu/geoms.py
+index f8efe29..c7d6e45 100644
+--- a/ggshu/ggshu/geoms.py
++++ b/ggshu/ggshu/geoms.py
+@@ -180,6 +180,30 @@ def __init__(
+         self.post_init()
+ 
+ 
++class GeomColumn(GeomArrow):
++    """Geometric mapping from aesthetics to column plots at both sides of the arrows(reactions) in the metabolic map.
++
++    Parameters
++    ----------
++    aes: Optional[Aesthetics]
++        with accepted aesthetics being `{"reaction", "y", "ymin", "ymax"}`.
++        "y" is required but "ymin" and/or "ymax" are optional and may not be
++        provided for all cases where "y" is present.
++    """
++
++    def __init__(
++        self,
++        *,
++        df: Optional[pd.DataFrame] = None,
++        aes: Optional[Aesthetics] = None,
++        side: str = "right",
++    ):
++        super().__init__(df=df, aes=aes)
++        prefix = "left_" if side == "left" else ""
++        self.mapping = {key: f"{prefix}column_{key}" for key in ["y", "ymin", "ymax"]}
++        self.post_init()
++
++
+ class GeomBoxPoint(Geom):
+     """Geometric mapping from aesthetics to the coloured boxes in the metabolic map.
+ 
+diff --git a/src/aesthetics.rs b/src/aesthetics.rs
+index 0881f9c..6ef5944 100644
+--- a/src/aesthetics.rs
++++ b/src/aesthetics.rs
+@@ -1,7 +1,7 @@
+ use crate::escher::{ArrowTag, CircleTag, Hover, Tag};
+ use crate::funcplot::{
+-    build_grad, from_grad_clamped, lerp, max_f32, min_f32, path_to_vec, plot_box_point, plot_hist,
+-    plot_kde, plot_line, plot_scales, zero_lerp, IgnoreSave,
++    build_grad, from_grad_clamped, lerp, max_f32, min_f32, path_to_vec, plot_box_point,
++    plot_column, plot_hist, plot_kde, plot_line, plot_scales, zero_lerp, IgnoreSave,
+ };
+ use crate::geom::{
+     AesFilter, AnyTag, Drag, GeomArrow, GeomHist, GeomMetabolite, HistPlot, HistTag, PopUp, Side,
+@@ -28,14 +28,23 @@ impl Plugin for AesPlugin {
+             .add_systems(Update, restore_geoms::<CircleTag>)
+             .add_systems(Update, restore_geoms::<ArrowTag>)
+             .add_systems(Update, normalize_histogram_height)
++            .add_systems(Update, normalize_histogram_color)
+             .add_systems(Update, unscale_histogram_children)
+             .add_systems(Update, fill_conditions)
+             .add_systems(Update, filter_histograms)
+             .add_systems(Update, activate_settings)
+             .add_systems(Update, follow_the_axes)
+             // TODO: check since these were before load_map
+-            .add_systems(PostUpdate, (build_axes, build_hover_axes, build_point_axes))
+-            .add_systems(Update, (plot_side_hist, plot_hover_hist))
++            .add_systems(
++                PostUpdate,
++                (
++                    build_axes,
++                    build_hover_axes,
++                    build_point_axes::<Point<f32>, PointAxis>,
++                    build_point_axes::<SummaryDist<f32>, ColumnAxis>,
++                ),
++            )
++            .add_systems(Update, (plot_side_hist, plot_hover_hist, plot_side_column))
+             .add_systems(Update, (plot_side_box, change_color.before(plot_side_box)));
+     }
+ }
+@@ -56,6 +65,45 @@ pub struct Gy {}
+ pub struct Point<T>(pub Vec<T>);
+ #[derive(Component)]
+ pub struct Distribution<T>(pub Vec<Vec<T>>);
++#[derive(Component)]
++pub struct SummaryDist<T>(pub Vec<(T, Option<T>, Option<T>)>);
++
++/// Marker trait for Xaxis for boxpoints.
++#[derive(Component)]
++struct PointAxis {}
++/// Marker trait for Xaxis for column plots.
++#[derive(Component)]
++pub struct ColumnAxis {}
++
++/// For a geom plotted in an axis, get the lower and upper bounds of the data
++/// and define a marker trait.
++trait Bounds<T, M> {
++    fn bounds(&self) -> (T, T);
++    fn axis_marker() -> M;
++}
++
++impl Bounds<f32, PointAxis> for Point<f32> {
++    fn bounds(&self) -> (f32, f32) {
++        (min_f32(&self.0), max_f32(&self.0))
++    }
++    fn axis_marker() -> PointAxis {
++        PointAxis {}
++    }
++}
++
++impl Bounds<f32, ColumnAxis> for SummaryDist<f32> {
++    fn bounds(&self) -> (f32, f32) {
++        self.0.iter().fold((0f32, 0f32), |acc, (a, b, c)| {
++            (
++                f32::min(acc.0, b.map(|b| a.min(b)).unwrap_or(*a)),
++                f32::max(acc.1, c.map(|c| a.max(c)).unwrap_or(*a)),
++            )
++        })
++    }
++    fn axis_marker() -> ColumnAxis {
++        ColumnAxis {}
++    }
++}
+ 
+ #[derive(Component)]
+ pub struct Gsize {}
+@@ -75,6 +123,10 @@ struct ColorListener {
+     max_val: f32,
+ }
+ 
++/// Marker for column plots to separate them from histogram plot queries.
++#[derive(Component)]
++struct ColumnNormalize;
++
+ /// Everytime this is sent, all data and plots are removed, leaving
+ /// the map as default. This is triggered when new data is added.
+ #[derive(Event)]
+@@ -331,17 +383,25 @@ fn build_axes(
+ }
+ 
+ /// Build axis.
+-fn build_point_axes(
++fn build_point_axes<Data: Component + Bounds<f32, Marker>, Marker: Component>(
+     mut commands: Commands,
+     mut query: Query<(&Transform, &ArrowTag, &Shape)>,
+-    mut aes_query: Query<
+-        (&Aesthetics, &mut GeomHist),
+-        (With<Gy>, Without<PopUp>, With<Point<f32>>),
+-    >,
++    mut aes_query: Query<(&Aesthetics, &mut GeomHist, &Data), (With<Gy>, Without<PopUp>)>,
+ ) {
+     let mut axes: HashMap<String, HashMap<Side, (Xaxis, Transform)>> = HashMap::new();
+     // first gather all x-limits for different conditions and the arrow and side
+-    for (aes, mut geom) in aes_query.iter_mut() {
++    let (min_val, max_val) = aes_query.iter().fold(
++        (f32::INFINITY, f32::NEG_INFINITY),
++        |acc, (_, geom, points)| {
++            if !geom.in_axis {
++                let bounds = &points.bounds();
++                (f32::min(acc.0, bounds.0), f32::max(acc.1, bounds.1))
++            } else {
++                acc
++            }
++        },
++    );
++    for (aes, mut geom, _) in aes_query.iter_mut() {
+         if geom.in_axis {
+             continue;
+         }
+@@ -384,7 +444,7 @@ fn build_point_axes(
+                         Xaxis {
+                             id: arrow.id.clone(),
+                             arrow_size: size,
+-                            xlimits: (0., 0.),
++                            xlimits: (min_val, max_val),
+                             side: geom.side.clone(),
+                             node_id: arrow.node_id,
+                             conditions: Vec::new(),
+@@ -402,10 +462,13 @@ fn build_point_axes(
+     for (mut axis, trans) in axes.into_values().flat_map(|side| side.into_values()) {
+         // conditions are sorted everywhere to be consistent across dropdowns, etc
+         axis.conditions.sort();
++        info!("spawning axes");
+         commands.spawn((
+             axis,
+             Drag::default(),
+             trans,
++            Gy {},
++            Data::axis_marker(),
+             Unscale {},
+             Visibility::default(),
+         ));
+@@ -529,7 +592,7 @@ fn plot_side_box(
+         ),
+         (With<Gy>, Without<PopUp>),
+     >,
+-    mut query: Query<(&mut Transform, &Xaxis), With<Unscale>>,
++    mut query: Query<(&mut Transform, &Xaxis), (With<Unscale>, With<PointAxis>)>,
+ ) {
+     let font: Handle<Font> = asset_server.load("fonts/FiraSans-Bold.ttf");
+     for (colors, aes, mut geom, is_box, ycat) in aes_query.iter_mut() {
+@@ -644,6 +707,96 @@ fn plot_side_box(
+     }
+ }
+ 
++fn plot_side_column(
++    mut commands: Commands,
++    mut aes_query: Query<
++        (&SummaryDist<f32>, &Aesthetics, &mut GeomHist, &AesFilter),
++        (With<Gy>, Without<PopUp>),
++    >,
++    mut query: Query<(&mut Transform, &Xaxis), With<ColumnAxis>>,
++) {
++    const COLUMN_PLOT_HEIGHT: f32 = 100.0;
++
++    for (heights, aes, mut geom, is_box) in aes_query.iter_mut() {
++        if geom.rendered {
++            continue;
++        }
++        info!("Plotting side column!");
++
++        for (mut trans, axis) in query.iter_mut() {
++            let (min_val, max_val) = axis.xlimits;
++            for index in aes
++                .identifiers
++                .iter()
++                .positions(|r| (r == &axis.id) & (geom.side == axis.side))
++            {
++                match geom.plot {
++                    HistPlot::Hist | HistPlot::Kde => {
++                        warn!(
++                            "Tried to plot a distribution from one point. Coercing to a Box Point!"
++                        );
++                    }
++                    _ => (),
++                };
++                let height = lerp(
++                    heights.0[index].0,
++                    min_val,
++                    max_val,
++                    0.0,
++                    COLUMN_PLOT_HEIGHT,
++                );
++                let min_height = heights.0[index]
++                    .1
++                    .map(|x| lerp(x, min_val, max_val, 0.0, COLUMN_PLOT_HEIGHT));
++                let max_height = heights.0[index]
++                    .2
++                    .map(|x| lerp(x, min_val, max_val, 0.0, COLUMN_PLOT_HEIGHT));
++
++                trans.translation.z += 10.;
++                let color_hex = match geom.side {
++                    Side::Right => "7dce9688",
++                    Side::Left => "DA968788",
++                    _ => panic!("data flow error: pop-up geom ended up in to column"),
++                };
++                let shape = {
++                    let cond_idx = axis
++                        .conditions
++                        .iter()
++                        .position(|x| x == aes.condition.as_ref().unwrap_or(&String::from("")))
++                        .unwrap_or(0) as f32;
++                    let column = plot_column(
++                        height,
++                        min_height,
++                        max_height,
++                        axis.conditions.len(),
++                        cond_idx,
++                    );
++                    (
++                        GeometryBuilder::build_as(&column),
++                        trans.with_scale(Vec3::new(1., 1., 1.)),
++                        Fill::color(Color::Srgba(Srgba::hex(color_hex).unwrap())),
++                        Stroke::new(Color::BLACK, 2.),
++                    )
++                };
++                commands.spawn((
++                    shape,
++                    VisCondition {
++                        condition: aes.condition.clone(),
++                    },
++                    HistTag {
++                        side: geom.side.clone(),
++                        node_id: axis.node_id,
++                        follow_scale: false,
++                    },
++                    (*is_box).clone(),
++                    ColumnNormalize,
++                    Unscale,
++                ));
++            }
++            geom.rendered = true;
++        }
++    }
++}
+ /// Plot hovered histograms of both metabolites and reactions.
+ fn plot_hover_hist(
+     mut commands: Commands,
+@@ -731,25 +884,27 @@ fn plot_hover_hist(
+ /// Normalize the height of histograms to be comparable with each other.
+ /// It treats the two sides independently.
+ fn normalize_histogram_height(
+-    mut ui_state: ResMut<UiState>,
++    ui_state: ResMut<UiState>,
+     mut query: Query<
+-        (
+-            &mut Transform,
+-            &mut Shape,
+-            &mut Fill,
+-            &HistTag,
+-            &VisCondition,
+-        ),
+-        Without<Unscale>,
++        (&mut Transform, &mut Shape, &HistTag),
++        (Without<Unscale>, With<VisCondition>),
+     >,
+ ) {
+-    for (mut trans, path, mut fill, hist, condition) in query.iter_mut() {
++    for (mut trans, path, hist) in query.iter_mut() {
+         let height = max_f32(&path.0.iter().map(|ev| ev.to().y).collect::<Vec<f32>>());
+         trans.scale.y = match hist.side {
+             Side::Left => ui_state.max_left / height,
+             Side::Right => ui_state.max_right / height,
+             Side::Up => ui_state.max_top / height,
+         };
++    }
++}
++
++fn normalize_histogram_color(
++    mut ui_state: ResMut<UiState>,
++    mut query: Query<(&mut Fill, &HistTag, &VisCondition), Without<ColorListener>>,
++) {
++    for (mut fill, hist, condition) in query.iter_mut() {
+         let ui_condition = ui_state.condition.clone();
+         fill.color = {
+             let color_ref = match hist.side {
+@@ -877,7 +1032,7 @@ fn activate_settings(
+     mut active_data: ResMut<ActiveData>,
+     arrows_or_boxes: Query<(&Aesthetics, &Point<f32>), Or<(With<GeomArrow>, With<GeomHist>)>>,
+     circles: Query<(&Aesthetics, &Point<f32>), With<GeomMetabolite>>,
+-    hists: Query<(&Aesthetics, &GeomHist), With<Distribution<f32>>>,
++    hists: Query<(&Aesthetics, &GeomHist), Or<(With<Distribution<f32>>, With<SummaryDist<f32>>)>>,
+ ) {
+     active_data.arrow = arrows_or_boxes
+         .iter()
+diff --git a/src/data.rs b/src/data.rs
+index 8c1bc9b..24da83d 100644
+--- a/src/data.rs
++++ b/src/data.rs
+@@ -136,6 +136,14 @@ pub struct Data {
+     box_variant: Option<Vec<String>>,
+     /// Vector of identifiers for horizontal ordering of the box boxpoints (left).
+     box_left_variant: Option<Vec<String>>,
++    /// Numeric values to plot a column plot (right).
++    column_y: Option<Vec<Number>>,
++    column_ymin: Option<Vec<Number>>,
++    column_ymax: Option<Vec<Number>>,
++    /// Numeric values to plot a column plot (left).
++    left_column_y: Option<Vec<Number>>,
++    left_column_ymin: Option<Vec<Number>>,
++    left_column_ymax: Option<Vec<Number>>,
+     /// Categorical values to be associated with conditions.
+     conditions: Option<Vec<String>>,
+     /// Categorical values to be associated with conditions.
+@@ -175,7 +183,8 @@ impl IsEmpty for Data {
+         self.left_y.is_empty() & self.hover_y.is_empty() & self.kde_y.is_empty() &
+         self.kde_left_y.is_empty() & self.kde_hover_y.is_empty() & self.box_y.is_empty() &
+         self.box_left_y.is_empty() & self.conditions.is_empty() & self.met_conditions.is_empty() &
+-        self.met_colors.is_empty() & self.met_sizes.is_empty() & self.met_y.is_empty() & self.kde_met_y.is_empty()
++        self.met_colors.is_empty() & self.met_sizes.is_empty() & self.met_y.is_empty() & self.kde_met_y.is_empty() &
++        self.column_y.is_empty() & self.left_column_y.is_empty()
+     }
+ }
+ 
+@@ -306,6 +315,67 @@ fn load_data(
+                     );
+                 };
+             }
++            for (y, ymin, ymax, geom_component) in [
++                (
++                    &mut data.column_y,
++                    &mut data.column_ymin,
++                    &mut data.column_ymax,
++                    GeomHist::right(HistPlot::Hist),
++                ),
++                (
++                    &mut data.left_column_y,
++                    &mut data.left_column_ymin,
++                    &mut data.left_column_ymax,
++                    GeomHist::right(HistPlot::Hist),
++                ),
++            ]
++            .into_iter()
++            {
++                if let Some(ref mut column_data) = y.as_mut() {
++                    let (mut data, ids): (Vec<(f32, Option<f32>, Option<f32>)>, Vec<String>) =
++                        indices
++                            .iter()
++                            .map(|i| {
++                                (
++                                    &column_data[*i],
++                                    ymin.as_ref().map(|s| s[*i].as_ref()).flatten(),
++                                    ymax.as_ref().map(|s| s[*i].as_ref()).flatten(),
++                                )
++                            })
++                            .zip(identifiers.iter())
++                            // filter values that are NaN
++                            .filter_map(|(range, id)| {
++                                range.0.as_ref().map(|x| {
++                                    (
++                                        (
++                                            *x,
++                                            range.1.as_deref().map(|x| *x),
++                                            range.2.as_deref().map(|x| *x),
++                                        ),
++                                        id.clone(),
++                                    )
++                                })
++                            })
++                            .unzip();
++                    if data.is_empty() {
++                        return;
++                    }
++                    commands.spawn((
++                        aesthetics::Gy {},
++                        aesthetics::SummaryDist(std::mem::take(&mut data)),
++                        geom_component,
++                        AesFilter {},
++                        aesthetics::Aesthetics {
++                            identifiers: ids,
++                            condition: if cond.is_empty() {
++                                None
++                            } else {
++                                Some(cond.to_string())
++                            },
++                        },
++                    ));
++                }
++            }
+             for (i, (aes, geom_component)) in [
+                 (&mut data.y, GeomHist::right(HistPlot::Hist)),
+                 (&mut data.left_y, GeomHist::left(HistPlot::Hist)),
+diff --git a/src/funcplot.rs b/src/funcplot.rs
+index 91bee94..ca07bb6 100644
+--- a/src/funcplot.rs
++++ b/src/funcplot.rs
+@@ -182,6 +182,41 @@ pub fn plot_box_point(n_cond: usize, cond_index: f32, cat_index: f32) -> Shape {
+     path_builder.build()
+ }
+ 
++/// Plot a column bar.
++pub fn plot_column(
++    height: f32,
++    ymin: Option<f32>,
++    ymax: Option<f32>,
++    n_cond: usize,
++    cond_index: f32,
++) -> Shape {
++    const COL_WIDTH: f32 = 40.;
++    let column_center = if n_cond == 0 {
++        0.
++    } else {
++        let center = cond_index * COL_WIDTH * 1.2;
++        center - n_cond as f32 * COL_WIDTH * 1.2 / 2.
++    };
++    let mut path_builder = PathBuilder::new();
++    path_builder.move_to(Vec2::new(column_center - COL_WIDTH / 2., 0.0));
++    path_builder.line_to(Vec2::new(column_center - COL_WIDTH / 2., height));
++    path_builder.line_to(Vec2::new(column_center + COL_WIDTH / 2., height));
++    path_builder.line_to(Vec2::new(column_center + COL_WIDTH / 2., 0.0));
++    path_builder.line_to(Vec2::new(column_center - COL_WIDTH / 2., 0.0));
++    // path_builder.close();
++    if let Some(min_height) = ymin {
++        path_builder.move_to(Vec2::new(column_center, min_height));
++        path_builder.line_to(Vec2::new(column_center, height));
++        // path_builder.close();
++    }
++    if let Some(max_height) = ymax {
++        path_builder.move_to(Vec2::new(column_center, height));
++        path_builder.line_to(Vec2::new(column_center, max_height));
++        // path_builder.close();
++    }
++    path_builder.build()
++}
++
+ type TextBundle<T> = (T, TextFont, TextColor, Transform);
+ 
+ /// Three text tags to be used as Components to build a an axis scale.
+diff --git a/src/legend/mod.rs b/src/legend/mod.rs
+index b99ac0d..d50ff66 100644
+--- a/src/legend/mod.rs
++++ b/src/legend/mod.rs
+@@ -4,7 +4,7 @@ use bevy::color::Srgba;
+ use bevy::prelude::*;
+ 
+ use crate::{
+-    aesthetics::{Aesthetics, Distribution, Gcolor, Gy, Point, Unscale},
++    aesthetics::{Aesthetics, ColumnAxis, Distribution, Gcolor, Gy, Point, SummaryDist, Unscale},
+     funcplot::{linspace, max_f32, min_f32},
+     geom::{GeomArrow, GeomHist, GeomMetabolite, PopUp, Side, Xaxis},
+     gui::{or_color, UiState},
+@@ -182,7 +182,7 @@ fn color_legend_histograms(
+     mut writer: TextUiWriter,
+     mut legend_query: Query<(Entity, &mut Node, &Side, &Children), With<LegendHist>>,
+     // Unscale means would mean that is not a histogram
+-    axis_query: Query<&Xaxis, Without<Unscale>>,
++    axis_query: Query<&Xaxis, Or<(Without<Unscale>, With<ColumnAxis>)>>,
+     // only queries for collapsing the legend if no hist data is displayed anymore
+     hist_query: Query<
+         &GeomHist,
+@@ -190,7 +190,7 @@ fn color_legend_histograms(
+             With<Gy>,
+             Without<PopUp>,
+             With<Aesthetics>,
+-            With<Distribution<f32>>,
++            Or<(With<Distribution<f32>>, With<SummaryDist<f32>>)>,
+         ),
+     >,
+     mut img_query: Query<&mut ImageNode>,

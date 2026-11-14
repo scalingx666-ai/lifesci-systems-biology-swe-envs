@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/iVis-at-Bilkent__pathway-mapper-284"
+description = "Overlay for selecting"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "pathway-mapper",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "iVis-at-Bilkent/pathway-mapper"
+ref = "288550669970b7143e68d1399833b552452a1970"
+reference = "https://github.com/iVis-at-Bilkent/pathway-mapper/pull/284"
+source_access = "auto"
+built_at = "2026-11-14T07:03:34.819311+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:6bf0e28ae19d282dd1131f607282a1290e8ed324548df912f94ac43d94773d35"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2023-06-20T09:12:39Z"
+diff_format = "unified"
+context_files = [
+    "packages/pathway-mapper/src/utils/GraphStyleSheet.tsx",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 12
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

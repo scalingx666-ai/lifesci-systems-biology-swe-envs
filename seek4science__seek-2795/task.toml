@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/seek4science__seek-2795"
+description = "Bump msgpack from 1.8.2 to 1.8.7"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "seek",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "seek4science/seek"
+ref = "766000e3a4b82c12844e87bfc13e4195a35bd19a"
+reference = "https://github.com/seek4science/seek/pull/2795"
+source_access = "auto"
+built_at = "2026-11-14T07:01:54.938699+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:bcc7415b241197ee2e8ea72d9434901c16f6ec1bd1becef76ecaf5a113792ce8"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-13T16:07:04Z"
+diff_format = "unified"
+context_files = [
+    "Gemfile.lock",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

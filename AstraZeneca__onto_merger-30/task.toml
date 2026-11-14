@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/AstraZeneca__onto_merger-30"
+description = "Update data_manager.py"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "onto_merger",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "AstraZeneca/onto_merger"
+ref = "c900c23d0cb75f6eabdf223660d8fc0bd216b2aa"
+reference = "https://github.com/AstraZeneca/onto_merger/pull/30"
+source_access = "auto"
+built_at = "2026-11-14T07:01:56.106390+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:91161b328bc2d12129505fe23c0a16f153b756ba9018b8af4d72fd720590b2a0"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2023-08-21T08:35:47Z"
+diff_format = "unified"
+context_files = [
+    "onto_merger/data/data_manager.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 4
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

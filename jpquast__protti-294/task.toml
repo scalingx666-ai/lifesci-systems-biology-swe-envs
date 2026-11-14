@@ -1,0 +1,67 @@
+version = "1.0"
+
+[task]
+name = "default/jpquast__protti-294"
+description = "Features/extend aa score"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "protti",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "jpquast/protti"
+ref = "aa9c9d8ca8e2945f9396d0916e8b1fc383c9c88b"
+reference = "https://github.com/jpquast/protti/pull/294"
+source_access = "auto"
+built_at = "2026-11-14T07:02:55.598853+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:6730fd58266ab909831d1f4cf297192ce115eebba94bf767e370eafd55f41c23"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-03-03T19:23:09Z"
+diff_format = "unified"
+context_files = [
+    "NEWS.md",
+    "R/calculate_aa_scores.R",
+    "R/calculate_go_enrichment.R",
+    "R/qc_sample_correlation.R",
+    "man/calculate_aa_scores.Rd",
+    "tests/testthat/test-workflow.R",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 52
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

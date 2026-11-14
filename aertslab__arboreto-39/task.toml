@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/aertslab__arboreto-39"
+description = "dask bugfix"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "arboreto",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "aertslab/arboreto"
+ref = "2f475dca08f47a60acc2beb8dd897e77b7495ca4"
+reference = "https://github.com/aertslab/arboreto/pull/39"
+source_access = "auto"
+built_at = "2026-11-14T07:02:41.309953+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:75547c5ca678e88942e069650b038576101907b8bf42376bc4c3695fa58af8e7"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2024-04-05T09:37:13Z"
+diff_format = "unified"
+context_files = [
+    "arboreto/core.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 4
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

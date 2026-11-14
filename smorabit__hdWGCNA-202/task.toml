@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/smorabit__hdWGCNA-202"
+description = "Add corSparse Internally (qlcMatrix archived from CRAN)"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "hdWGCNA",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "smorabit/hdWGCNA"
+ref = "952eda63370acf72ee4aae60f1df0e2cd3ce52d0"
+reference = "https://github.com/smorabit/hdWGCNA/pull/202"
+source_access = "auto"
+built_at = "2026-11-14T05:45:43.427541+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:3a62856e124162d615846d2766b371acfcf83f3fbbcfb984104d50bd5e517d01"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2024-01-29T23:43:56Z"
+diff_format = "unified"
+context_files = [
+    "DESCRIPTION",
+    "R/ModuleConnectivity.R",
+    "R/helpers.R",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 61
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

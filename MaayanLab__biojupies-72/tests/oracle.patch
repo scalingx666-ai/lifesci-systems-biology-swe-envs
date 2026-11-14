@@ -1,0 +1,97 @@
+diff --git a/server/Dockerfile b/server/Dockerfile
+index 287a2f6..a7c3d95 100644
+--- a/server/Dockerfile
++++ b/server/Dockerfile
+@@ -14,7 +14,7 @@ COPY requirements.txt .
+ RUN . /notebook-generator-server/venv/bin/activate && pip3 install -r requirements.txt
+ RUN . /notebook-generator-server/venv/bin/activate && python -m ipykernel install --user --name venv --display-name "python3-venv"
+ 
+-ENV LIBRARY_VERSION=v1.0.5
++ENV LIBRARY_VERSION=v1.1.4
+ 
+ COPY . /notebook-generator-server  
+ WORKDIR /notebook-generator-server
+diff --git a/server/requirements.txt b/server/requirements.txt
+index a962a80..352cda5 100644
+--- a/server/requirements.txt
++++ b/server/requirements.txt
+@@ -80,7 +80,7 @@ parso==0.2.0
+ pexpect==4.5.0
+ pickleshare==0.7.4
+ pkg-resources==0.0.0
+-plotly==2.5.1
++plotly==3.7.1
+ ply==3.8
+ prompt-toolkit==1.0.15
+ proto-google-cloud-datastore-v1==0.90.4
+diff --git a/website/app/app.py b/website/app/app.py
+index 75dd68b..508f050 100644
+--- a/website/app/app.py
++++ b/website/app/app.py
+@@ -930,10 +930,10 @@ def upload_reads():
+ 	elif request.form.get('expression'):
+ 
+ 		# Get form
+-		f = request.form
++		f = request.form.to_dict()
+ 
+ 		# Get samples for group table
+-		samples = json.loads(f.to_dict()['expression'])['columns']
++		samples = json.loads(f['expression'])['columns']
+ 		samples.sort()
+ 
+ 		# Get groups
+@@ -943,6 +943,15 @@ def upload_reads():
+ 		# Assign groups
+ 		matches = {sample: [group for group in groups if group in sample] for sample in samples}
+ 		sample_groups = [{'sample': sample, 'group': matches[sample][-1] if len(matches[sample]) else ''} for sample in samples]
++
++		# Get alignment species, if from FASTQ
++		if f.get('alignment_uid'):
++			# Find species
++			session = Session()
++			alignment_data = session.query(tables['fastq_alignment']).filter(tables['fastq_alignment'].columns['alignment_uid'] == f.get('alignment_uid')).first()
++			alignment_species = alignment_data.species if alignment_data else None
++			session.close()
++			f['reference_genome'] = alignment_species.replace('hs', 'GRCh38 human').replace('mm', 'GRCh38 mouse')
+ 			
+ 		# Return result
+ 		return render_template('upload/upload_metadata.html', sample_groups=sample_groups, f=f, uploadtype='table')
+diff --git a/website/app/static/py/TableManager.py b/website/app/static/py/TableManager.py
+index fdd3843..307929b 100644
+--- a/website/app/static/py/TableManager.py
++++ b/website/app/static/py/TableManager.py
+@@ -98,6 +98,8 @@ def buildH5(data, dataset_uid):
+ 		if data.get('qc'):
+ 			sequencing_grp = f.create_group('meta/sequencing')
+ 			sequencing_grp.create_dataset('qc', data=data['qc'], dtype=h5py.special_dtype(vlen=str))
++			sequencing_grp.create_dataset('reference_genome', data=data.get('reference_genome'), dtype=h5py.special_dtype(vlen=str))
++
+ 
+ 		# Close file
+ 		f.close()
+diff --git a/website/app/templates/upload/upload_metadata.html b/website/app/templates/upload/upload_metadata.html
+index 389f30c..d403cb6 100644
+--- a/website/app/templates/upload/upload_metadata.html
++++ b/website/app/templates/upload/upload_metadata.html
+@@ -155,6 +155,7 @@
+ 		<input type="hidden" id="metadata" name="metadata" value="">
+ 		{% if f.get('alignment_uid') %}
+ 			<input type="hidden" name="alignment_uid" value="{{ f['alignment_uid'] }}">
++			<input type="hidden" name="reference_genome" value="{{ f['reference_genome'] }}">
+ 		{% endif %}
+ 		{% if f.get('qc') %}
+ 			<input type="hidden" name="qc" value="{{ f['qc'] }}">
+diff --git a/website/boot.sh b/website/boot.sh
+index f2ad982..9b915a6 100644
+--- a/website/boot.sh
++++ b/website/boot.sh
+@@ -55,7 +55,7 @@ http {
+     server {
+         listen 80;
+         charset utf-8;
+-        client_max_body_size 20M;
++        client_max_body_size 30M;
+         sendfile on;
+         keepalive_timeout 0;
+         large_client_header_buffers 8 32k;

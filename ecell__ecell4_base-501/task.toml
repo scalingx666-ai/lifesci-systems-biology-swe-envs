@@ -1,0 +1,70 @@
+version = "1.0"
+
+[task]
+name = "default/ecell__ecell4_base-501"
+description = "Upgrade the wheel package to align with the current Linux requirements."
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "ecell4_base",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "ecell/ecell4_base"
+ref = "1f9f69cf7e61786ad1e85e1e0413108b9bf223d6"
+reference = "https://github.com/ecell/ecell4_base/pull/501"
+source_access = "auto"
+built_at = "2026-11-14T07:03:33.765324+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:880a947c68761862d85575f24bd6dc1ae1d22eab01c34bf4b76a70e45ca29ecf"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-11-22T05:40:31Z"
+diff_format = "unified"
+context_files = [
+    ".circleci/config.yml",
+    ".github/workflows/wheels.yml",
+    "CMakeLists.txt",
+    "appveyor.yml",
+    "azure-pipelines.yml",
+    "ecell4/core/Triangle.cpp",
+    "greens_functions",
+    "pyproject.toml",
+    "setup.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 228
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

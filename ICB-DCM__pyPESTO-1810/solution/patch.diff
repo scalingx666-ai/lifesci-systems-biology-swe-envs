@@ -1,0 +1,105 @@
+diff --git a/doc/example/amici.ipynb b/doc/example/amici.ipynb
+index 8cd99189a..06e9d800c 100644
+--- a/doc/example/amici.ipynb
++++ b/doc/example/amici.ipynb
+@@ -669,7 +669,7 @@
+     "\n",
+     "A PEtab problem consist of an [SBML](https://sbml.org) file, defining the model topology and a set of `.tsv` files, defining experimental conditions, observables, measurements and parameters (and their optimization bounds, scale, priors...). All files that make up a PEtab problem can be structured in a `.yaml` file. The `pypesto.Objective` coming from a PEtab problem corresponds to the negative-log-likelihood/negative-log-posterior distribution of the parameters.\n",
+     "\n",
+-    "For more details on PEtab, the interested reader is referred to [PEtab's format definition](https://petab.readthedocs.io/en/latest/documentation_data_format.html), for examples the reader is referred to the [PEtab benchmark collection](https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab). For demonstration purposes, a simple model of conversion-reaction will be used as the running example throughout this notebook.\n"
++    "For more details on PEtab, the interested reader is referred to [PEtab's format definition](https://petab.readthedocs.io/en/latest/documentation_data_format.html), for examples the reader is referred to the [PEtab benchmark collection](https://github.com/PEtab-dev/petab-benchmark-problems). For demonstration purposes, a simple model of conversion-reaction will be used as the running example throughout this notebook.\n"
+    ]
+   },
+   {
+diff --git a/doc/example/getting_started.ipynb b/doc/example/getting_started.ipynb
+index c363a0a62..cdb89a155 100644
+--- a/doc/example/getting_started.ipynb
++++ b/doc/example/getting_started.ipynb
+@@ -201,7 +201,7 @@
+     "\n",
+     "A PEtab problem consist of an [SBML](https://sbml.org) file, defining the model topology and a set of `.tsv` files, defining experimental conditions, observables, measurements and parameters (and their optimization bounds, scale, priors...). All files that make up a PEtab problem can be structured in a `.yaml` file. The `pypesto.Objective` coming from a PEtab problem corresponds to the negative-log-likelihood/negative-log-posterior distribution of the parameters.\n",
+     "\n",
+-    "For more details on PEtab, the interested reader is referred to [PEtab's format definition](https://petab.readthedocs.io/en/latest/documentation_data_format.html), for examples, the reader is referred to the [PEtab benchmark collection](https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab). The Model from _[Böhm et al. JProteomRes 2014](https://pubs.acs.org/doi/abs/10.1021/pr5006923)_ is part of the benchmark collection and will be used as the running example throughout this notebook.\n",
++    "For more details on PEtab, the interested reader is referred to [PEtab's format definition](https://petab.readthedocs.io/en/latest/documentation_data_format.html), for examples, the reader is referred to the [PEtab benchmark collection](https://github.com/PEtab-dev/petab-benchmark-problems). The Model from _[Böhm et al. JProteomRes 2014](https://pubs.acs.org/doi/abs/10.1021/pr5006923)_ is part of the benchmark collection and will be used as the running example throughout this notebook.\n",
+     "\n",
+     "PyPESTO provides an interface to the model simulation tool [AMICI](https://github.com/AMICI-dev/AMICI) for the simulation of Ordinary Differential Equation (ODE) models specified in the SBML format."
+    ]
+diff --git a/doc/example/petab_import.ipynb b/doc/example/petab_import.ipynb
+index 4aa3e91a5..d865272ad 100644
+--- a/doc/example/petab_import.ipynb
++++ b/doc/example/petab_import.ipynb
+@@ -12,7 +12,7 @@
+    "metadata": {},
+    "source": [
+     "In this notebook, we illustrate how to use [pyPESTO](https://github.com/icb-dcm/pypesto.git) together with [PEtab](https://github.com/petab-dev/petab.git) and [AMICI](https://github.com/AMICI-dev/AMICI). The notebook first details the individual steps of the import and the creation of the objective function. Note that those steps can be summarised, demonstrated at the end of the 'Import' section. After that, optimization and visualisation are showcased.\n",
+-    "We employ models from the [benchmark collection](https://github.com/benchmarking-initiative/benchmark-models-petab), which we first download:"
++    "We employ models from the [benchmark collection](https://github.com/PEtab-dev/petab-benchmark-problems), which we first download:"
+    ]
+   },
+   {
+@@ -22,7 +22,7 @@
+     "# install if not done yet\n",
+     "# !apt install libatlas-base-dev swig\n",
+     "# %pip install pypesto[amici,petab] --quiet\n",
+-    "# %pip install git+https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab.git@master#subdirectory=src/python --quiet"
++    "# %pip install git+https://github.com/PEtab-dev/petab-benchmark-problems.git@main#subdirectory=src/python --quiet"
+    ],
+    "outputs": [],
+    "execution_count": null
+diff --git a/doc/example/store.ipynb b/doc/example/store.ipynb
+index 18df12962..735a43f05 100644
+--- a/doc/example/store.ipynb
++++ b/doc/example/store.ipynb
+@@ -96,7 +96,7 @@
+    "source": [
+     "## 0. Objective function and problem definition\n",
+     "\n",
+-    "We will use the Boehm model from the [benchmark initiative](https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab) in this notebook as an example.\n",
++    "We will use the Boehm model from the [benchmark initiative](https://github.com/PEtab-dev/petab-benchmark-problems) in this notebook as an example.\n",
+     "We load the model through [PEtab](https://petab.readthedocs.io/en/latest/), a data format for specifying parameter estimation problems in systems biology."
+    ]
+   },
+diff --git a/pyproject.toml b/pyproject.toml
+index f534f6dd6..a80c8d7de 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -175,7 +175,7 @@ example = [
+   "pypesto[pyswarms]",
+   "notebook>=6.1.4",
+   "ipywidgets>=8.1.5",
+-  "benchmark_models_petab @ git+https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab.git@master#subdirectory=src/python",
++  "benchmark_models_petab @ git+https://github.com/PEtab-dev/petab-benchmark-problems.git@main#subdirectory=src/python",
+ ]
+ 
+ doc = [
+diff --git a/tox.ini b/tox.ini
+index 6b9db6f63..c64516a01 100644
+--- a/tox.ini
++++ b/tox.ini
+@@ -62,7 +62,7 @@ description =
+ [testenv:base]
+ extras = test,amici,petab,emcee,dynesty,mltools,pymc,jax,fides,roadrunner
+ deps =
+-    git+https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab.git@master\#subdirectory=src/python
++    git+https://github.com/PEtab-dev/petab-benchmark-problems.git@main\#subdirectory=src/python
+     git+https://github.com/PEtab-dev/petab_test_suite@main
+ commands =
+     pytest --cov=pypesto --cov-report=xml --cov-append \
+@@ -87,7 +87,7 @@ description =
+ [testenv:petab]
+ extras = test,petab,pyswarm,roadrunner
+ deps =
+-    git+https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab.git@master\#subdirectory=src/python
++    git+https://github.com/PEtab-dev/petab-benchmark-problems.git@main\#subdirectory=src/python
+ # always install amici from main branch, avoid caching
+ #  to skip re-installation, run `tox -e petab --override testenv:petab.commands_pre=`
+ commands_pre =
+@@ -129,7 +129,7 @@ description =
+ [testenv:hierarchical]
+ extras = test,petab,amici,fides
+ deps =
+-    git+https://github.com/Benchmarking-Initiative/Benchmark-Models-PEtab.git@master\#subdirectory=src/python
++    git+https://github.com/PEtab-dev/petab-benchmark-problems.git@main\#subdirectory=src/python
+     antimony
+ # always install amici from main branch (PEtab v2 parameter scales need
+ #  amici>1.1.0), avoid caching

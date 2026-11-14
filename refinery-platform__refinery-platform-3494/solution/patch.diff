@@ -1,0 +1,80 @@
+diff --git a/refinery/data_set_manager/models.py b/refinery/data_set_manager/models.py
+index e0f00f8c63..65390eca99 100644
+--- a/refinery/data_set_manager/models.py
++++ b/refinery/data_set_manager/models.py
+@@ -614,7 +614,7 @@ def get_parents(self):
+         """
+         return [parent.uuid for parent in self.parents.all()]
+ 
+-    def get_auxiliary_nodes(self):
++    def get_auxiliary_node_uuids(self):
+         """
+         Return a list of uuids of auxiliary Nodes for a Given Node
+         """
+diff --git a/refinery/data_set_manager/test_models.py b/refinery/data_set_manager/test_models.py
+index 2f97e646fe..1e7f42c54b 100644
+--- a/refinery/data_set_manager/test_models.py
++++ b/refinery/data_set_manager/test_models.py
+@@ -135,7 +135,7 @@ def test_create_and_associate_auxiliary_node(self):
+             uuid=self.node.get_children()[0]
+         ).is_auxiliary_node)
+ 
+-    def test_get_auxiliary_nodes(self):
++    def test_get_auxiliary_node_uuids(self):
+         self.assertEqual(self.node.get_children(), [])
+         for i in xrange(2):
+             self.node.create_and_associate_auxiliary_node(self.filestore_item)
+diff --git a/refinery/tool_manager/models.py b/refinery/tool_manager/models.py
+index 5950ee017a..c867597c8b 100644
+--- a/refinery/tool_manager/models.py
++++ b/refinery/tool_manager/models.py
+@@ -548,8 +548,14 @@ def _get_detailed_nodes_dict(self, node_uuid_list,
+             - A full url pointing to our Node's FileStoreItem's datafile
+         """
+         solr_response_json = get_solr_response_json(node_uuid_list)
+-        node_info = {
+-            node["uuid"]: {
++        node_info = {}
++        for node in solr_response_json["nodes"]:
++
++            auxiliary_node_uuids = Node.objects.get(
++                uuid=node["uuid"]
++            ).get_auxiliary_node_uuids()
++
++            node_info[node["uuid"]] = {
+                 self.NODE_SOLR_INFO: node,
+                 self.FILE_URL: get_file_url_from_node_uuid(
+                     node["uuid"],
+@@ -557,13 +563,11 @@ def _get_detailed_nodes_dict(self, node_uuid_list,
+                 ),
+                 self.AUXILIARY_FILE_LIST: [
+                     get_file_url_from_node_uuid(
+-                        child.uuid, require_valid_url=require_valid_urls
+-                    ) for child in Node.objects.get(uuid=node["uuid"]).
+-                    get_auxiliary_nodes()
++                        uuid, require_valid_url=require_valid_urls
++                    ) for uuid in auxiliary_node_uuids
+                 ]
+             }
+-            for node in solr_response_json["nodes"]
+-        }
++
+         return node_info
+ 
+     def _get_visualization_parameters(self):
+diff --git a/refinery/tool_manager/tests.py b/refinery/tool_manager/tests.py
+index 1381c6e368..a7dd914e12 100644
+--- a/refinery/tool_manager/tests.py
++++ b/refinery/tool_manager/tests.py
+@@ -719,10 +719,7 @@ def _create_detailed_nodes_dict(self, nodes):
+         return {
+             node.uuid: {
+                 'file_url': self.node.file_item.get_datafile_url(),
+-                'auxiliary_file_list': [
+-                    child.uuid for child in
+-                    self.node.get_auxiliary_nodes()
+-                ],
++                'auxiliary_file_list': self.node.get_auxiliary_node_uuids(),
+                 VisualizationTool.NODE_SOLR_INFO: {
+                     'uuid': node.uuid,
+                     'name': node.name,

@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/Data2Dynamics__d2d-153"
+description = "Minor change: conversion to symbolic in MATLAB2020a"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "d2d",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Data2Dynamics/d2d"
+ref = "721f46f6997c93063193039ce1c8fb4ffaf246d0"
+reference = "https://github.com/Data2Dynamics/d2d/pull/153"
+source_access = "auto"
+built_at = "2026-11-14T07:03:17.528324+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:90349b5ee8ae68acfcfa3fa31ca502c6dfbfa08898a584330430dee7a41871ea"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2020-06-09T11:53:43Z"
+diff_format = "unified"
+context_files = [
+    "arFramework3/arCompileAll.m",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 4
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

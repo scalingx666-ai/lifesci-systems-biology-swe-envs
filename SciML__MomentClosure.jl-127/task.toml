@@ -1,0 +1,67 @@
+version = "1.0"
+
+[task]
+name = "default/SciML__MomentClosure.jl-127"
+description = "Cancel superseded PR CI runs"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "MomentClosure.jl",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "SciML/MomentClosure.jl"
+ref = "903f577bcbf563ecac023f95e8ddfc81c3b9db3c"
+reference = "https://github.com/SciML/MomentClosure.jl/pull/127"
+source_access = "auto"
+built_at = "2026-11-14T07:04:17.747856+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:a11b7a349511d24f01c1b2e796c1a28344701c2ed54d260d1b9c8cc0a8272001"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-17T16:33:20Z"
+diff_format = "unified"
+context_files = [
+    ".github/workflows/DependabotAutoMerge.yml",
+    ".github/workflows/DocPreviewCleanup.yml",
+    ".github/workflows/FormatCheck.yml",
+    ".github/workflows/RunicSuggestions.yml",
+    ".github/workflows/SpellCheck.yml",
+    ".github/workflows/benchmark.yml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 18
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

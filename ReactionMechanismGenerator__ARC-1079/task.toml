@@ -1,0 +1,73 @@
+version = "1.0"
+
+[task]
+name = "default/ReactionMechanismGenerator__ARC-1079"
+description = "Honour the per-user job cap, size pipe job arrays to it, and hand a failed array's tasks to the Scheduler"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "ARC",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "ReactionMechanismGenerator/ARC"
+ref = "d3d7c5524d00d77dd5b08abc29d8d6cd1daca58a"
+reference = "https://github.com/ReactionMechanismGenerator/ARC/pull/1079"
+source_access = "auto"
+built_at = "2026-11-14T07:03:54.895997+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:e008cebbe6be11bdd9882bc9fe0b1b31c9ed3dc2b522ec7e064babfa4c63a3fd"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-13T18:28:01Z"
+diff_format = "unified"
+context_files = [
+    "arc/job/local.py",
+    "arc/job/local_test.py",
+    "arc/job/pipe/pipe_coordinator.py",
+    "arc/job/pipe/pipe_coordinator_test.py",
+    "arc/job/pipe/pipe_run.py",
+    "arc/job/pipe/pipe_run_test.py",
+    "arc/job/pipe/queue_limit.py",
+    "arc/job/pipe/queue_limit_test.py",
+    "arc/job/ssh.py",
+    "arc/job/ssh_test.py",
+    "arc/scheduler_pipe_test.py",
+    "arc/settings/settings.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 1185
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

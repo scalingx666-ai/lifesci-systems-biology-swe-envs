@@ -1,0 +1,68 @@
+version = "1.0"
+
+[task]
+name = "default/biosustain__shu-56"
+description = "[FEAT] geom_col"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "shu",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "biosustain/shu"
+ref = "e39427484df324b4d73a19a5c67824538b2274c6"
+reference = "https://github.com/biosustain/shu/pull/56"
+source_access = "auto"
+built_at = "2026-11-14T07:03:48.788717+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:badd3c189d7929f93d24e22c24b2fe83bdab85c3ffc4c12dd9d27dcbb28e82f4"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-05-22T09:38:47Z"
+diff_format = "unified"
+context_files = [
+    "ggshu/ggshu/__init__.py",
+    "ggshu/ggshu/aes.py",
+    "ggshu/ggshu/geoms.py",
+    "src/aesthetics.rs",
+    "src/data.rs",
+    "src/funcplot.rs",
+    "src/legend/mod.rs",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 343
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

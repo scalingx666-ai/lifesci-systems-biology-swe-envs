@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/igordot__msigdbr-2"
+description = "Fix variable name in vignette"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "msigdbr",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "igordot/msigdbr"
+ref = "60a89f3aa43fe0745905ab58f121d9d28601d1ad"
+reference = "https://github.com/igordot/msigdbr/pull/2"
+source_access = "auto"
+built_at = "2026-11-14T07:02:09.234690+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:6d2e13acb3f136d6246f2003b924ebaaafb9561042c838335a87d34a41a389ce"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2018-10-10T17:37:14Z"
+diff_format = "unified"
+context_files = [
+    "vignettes/msigdbr-intro.Rmd",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

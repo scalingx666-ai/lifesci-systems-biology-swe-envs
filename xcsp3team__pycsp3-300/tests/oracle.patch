@@ -1,0 +1,789 @@
+diff --git a/pycsp3/classes/main/constraints.py b/pycsp3/classes/main/constraints.py
+index 8027b5fa..bba98e81 100644
+--- a/pycsp3/classes/main/constraints.py
++++ b/pycsp3/classes/main/constraints.py
+@@ -1203,31 +1203,47 @@ def __xor__(self, other):
+     __rxor__ = __xor__  # e ^ c
+ 
+     def __add__(self, other):
++        if isinstance(other, int):
++            return ConstraintDummyConstant(self.val + other)
+         return other if self.val == 0 else other + self.val
+ 
+     __radd__ = __add__
+ 
+     def __sub__(self, other):  # self - other
++        if isinstance(other, int):
++            return ConstraintDummyConstant(self.val - other)
+         return -other if self.val == 0 else self.val - other
+ 
+     def __rsub__(self, other):  # other - self
++        if isinstance(other, int):
++            return ConstraintDummyConstant(other - self.val)
+         return other if self.val == 0 else other - self.val
+ 
+     def __mul__(self, other):
++        if isinstance(other, int):
++            return ConstraintDummyConstant(self.val * other)
+         return self if self.val == 0 else other if self.val == 1 else other * self.val
+ 
+     __rmul__ = __mul__
+ 
+     def __floordiv__(self, other):  # self // other
++        if isinstance(other, int):
++            return ConstraintDummyConstant(self.val // other)
+         return self if self.val == 0 else self.val // other
+ 
+     def __rfloordiv__(self, other):  # other // self
++        if isinstance(other, int):
++            return ConstraintDummyConstant(other // self.val)
+         return other if self.val == 1 else other // self.val
+ 
+     def __mod__(self, other):  # self % other
++        if isinstance(other, int):
++            return ConstraintDummyConstant(self.val % other)
+         return self if self.val == 0 else self.val % other
+ 
+     def __rmod__(self, other):  # other % self
++        if isinstance(other, int):
++            return ConstraintDummyConstant(other % self.val)
+         return 0 if self.val == 1 else other % self.val
+ 
+     def __invert__(self):
+@@ -1423,6 +1439,8 @@ def __getitem__(self, i):
+         lst = self.constraint.arguments[TypeCtrArg.LIST].content
+         assert is_matrix(lst), "Variables in element constraint must be in the form of matrix"
+         index = self.constraint.arguments[TypeCtrArg.INDEX].content
++        if isinstance(i, ConstraintDummyConstant):
++            i = i.val
+         if isinstance(i, Variable):
+             assert is_matrix(lst), "Variables in element constraint must be in the form of matrix"
+             self.constraint = ConstraintElementMatrix(lst, index, i)
+diff --git a/pycsp3/functions.py b/pycsp3/functions.py
+index 0ebc3462..0472e308 100644
+--- a/pycsp3/functions.py
++++ b/pycsp3/functions.py
+@@ -1,3 +1,4 @@
++import functools
+ import inspect
+ import math
+ import types
+@@ -24,7 +25,7 @@
+ from pycsp3.classes.nodes import TypeNode, Node, neg_var
+ from pycsp3.dashboard import options
+ from pycsp3.tools.curser import queue_in, check_no_negated_membership, columns, OpOverrider, ListInt, ListVar, ListMultipleVar, ListCtr, cursing, convert_to_namedtuples
+-from pycsp3.tools.inspector import checkType, extract_declaration_for, comment_and_tags_of, comments_and_tags_of_parameters_of
++from pycsp3.tools.inspector import checkType, extract_declaration_for, comment_and_tags_of, comments_and_tags_of_parameters_of, decorator_wrappers
+ from pycsp3.tools.utilities import (flatten, is_containing, is_1d_list, is_1d_tuple, is_matrix, ANY, ALL, error, warning, warning_if, error_if, is_2d_list)
+ 
+ from pycsp3.classes.auxiliary.tables import to_starred_table_for_no_overlap1, to_starred_table_for_no_overlap2
+@@ -1991,6 +1992,37 @@ def _excepting_tuples(excepting, name):
+     return sorted(tuples) if len(tuples) > 0 else None
+ 
+ 
++def _integers_of(arg):
++    """
++    Returns the argument with any constant (ConstraintDummyConstant) replaced by its value, also inside lists and tuples (rebuilt only when
++    they contain a constant); a generator is replaced by the list of its elements (because it is consumed when looking for constants)
++    """
++    if isinstance(arg, ConstraintDummyConstant):
++        return arg.val
++    if isinstance(arg, types.GeneratorType):
++        return [_integers_of(v) for v in arg]
++    if isinstance(arg, (list, tuple)):
++        t = [_integers_of(v) for v in arg]
++        if any(u is not v for u, v in zip(t, arg)):
++            return t if isinstance(arg, list) else tuple(t)
++    return arg
++
++
++def _constants_as_integers(f):
++    """
++    Decorator of the functions of global constraints: any constant (ConstraintDummyConstant) given in the arguments, as c[i] for a list c of
++    identical integers, is replaced by its value, as an integer
++    """
++
++    @functools.wraps(f)
++    def _constants_as_integers_wrapper(*args, **kwargs):
++        return f(*[_integers_of(arg) for arg in args], **{k: _integers_of(v) for k, v in kwargs.items()})
++
++    decorator_wrappers.add(_constants_as_integers_wrapper.__code__)  # the frames of the wrapper are ignored by the inspector
++    return _constants_as_integers_wrapper
++
++
++@_constants_as_integers
+ def AllDifferent(term, *others, excepting=None, matrix=False):
+     """
+     Builds and returns a constraint AllDifferent.
+@@ -2112,6 +2144,7 @@ def _check_lists_of_list_constraint(name, term, others, excepting):
+     return lists
+ 
+ 
++@_constants_as_integers
+ def AllDifferentList(term, *others, excepting=None):
+     """
+     Builds and returns a constraint AllDifferentList.
+@@ -2158,6 +2191,7 @@ def AllDifferentList(term, *others, excepting=None):
+     return ECtr(ConstraintAllDifferentList(lists, excepting))
+ 
+ 
++@_constants_as_integers
+ def AllEqual(term, *others, excepting=None):
+     """
+     Builds and returns a constraint AllEqual.
+@@ -2209,6 +2243,7 @@ def AllEqual(term, *others, excepting=None):
+     return ECtr(ConstraintAllEqual(terms, excepting))
+ 
+ 
++@_constants_as_integers
+ def AllEqualList(term, *others, excepting=None):
+     """
+     Builds and returns a constraint AllEqualList.
+@@ -2278,6 +2313,7 @@ def _ordered(term, others, operator, lengths):
+     return ECtr(ConstraintOrdered(terms, operator, lengths))
+ 
+ 
++@_constants_as_integers
+ def Increasing(term, *others, strict=False, lengths=None):
+     """
+     Builds and returns a constraint Increasing.
+@@ -2312,6 +2348,7 @@ def Increasing(term, *others, strict=False, lengths=None):
+     return _ordered(term, others, TypeOrderedOperator.INCREASING if not strict else TypeOrderedOperator.STRICTLY_INCREASING, lengths)
+ 
+ 
++@_constants_as_integers
+ def Decreasing(term, *others, strict=False, lengths=None):
+     """
+     Builds and returns a constraint Decreasing.
+@@ -2388,6 +2425,7 @@ def _lex(term, others, operator, matrix):
+     return ECtr(ConstraintLexMatrix(lists, operator)) if matrix else ECtr(ConstraintLex(lists, operator))
+ 
+ 
++@_constants_as_integers
+ def LexIncreasing(term, *others, strict=False, matrix=False):
+     """
+     Builds and returns a constraint (increasing) Lexicographic.
+@@ -2434,6 +2472,7 @@ def LexIncreasing(term, *others, strict=False, matrix=False):
+     return _lex(term, others, TypeOrderedOperator.INCREASING if not strict else TypeOrderedOperator.STRICTLY_INCREASING, matrix)
+ 
+ 
++@_constants_as_integers
+ def LexDecreasing(term, *others, strict=False, matrix=False):
+     """
+     Builds and returns a constraint (decreasing) Lexicographic.
+@@ -2471,6 +2510,7 @@ def LexDecreasing(term, *others, strict=False, matrix=False):
+     return _lex(term, others, TypeOrderedOperator.DECREASING if not strict else TypeOrderedOperator.STRICTLY_DECREASING, matrix)
+ 
+ 
++@_constants_as_integers
+ def Disjoint(term, *others):
+     """
+     Builds and returns a constraint Disjoint.
+@@ -2497,6 +2537,7 @@ def Disjoint(term, *others):
+     return ECtr(ConstraintDisjoint(lists))
+ 
+ 
++@_constants_as_integers
+ def Precedence(within, *, values=None, covered=False):
+     """
+     Builds and returns a constraint Precedence.
+@@ -2607,6 +2648,7 @@ def _term_with_condition(term, condition):
+     return Node.build(condition.operator, term, condition.right_operand())
+ 
+ 
++@_constants_as_integers
+ def Sum(term, *others, condition=None):
+     """
+     Builds and returns a component Sum (that becomes a constraint when subject to a condition).
+@@ -2738,6 +2780,7 @@ def _manage_coeffs(terms, coeffs):
+     return _wrapping_by_complete_or_partial_constraint(ConstraintSum(terms, coeffs, condition))
+ 
+ 
++@_constants_as_integers
+ def Product(term, *others):
+     """
+     Builds and returns a node 'mul', root of a tree expression where specified arguments are children.
+@@ -2945,6 +2988,7 @@ def _exist(name, terms, value, reified_by):
+ 
+ 
+ 
++@_constants_as_integers
+ def Count(within, *within_complement, value=None, values=None, condition=None):
+     """
+     Builds and returns a component Count (that becomes a constraint when subject to a condition).
+@@ -2982,6 +3026,7 @@ def Count(within, *within_complement, value=None, values=None, condition=None):
+     return _count("Count", flatten(within, within_complement), value, values, condition)
+ 
+ 
++@_constants_as_integers
+ def Exist(within, *within_complement, value=None, reified_by=None):
+     """
+     Builds and returns a constraint Count that checks if at least one term takes the specified value.
+@@ -3020,6 +3065,7 @@ def Exist(within, *within_complement, value=None, reified_by=None):
+     return _exist("Exist", flatten(within, within_complement), value, reified_by)
+ 
+ 
++@_constants_as_integers
+ def AnyHold(within, *within_complement):
+     """
+     Builds and returns a constraint Count that checks if at least one term evaluates to 1 (seen as True).
+@@ -3042,6 +3088,7 @@ def AnyHold(within, *within_complement):
+     return _exist("AnyHold", flatten(within, within_complement), None, None)
+ 
+ 
++@_constants_as_integers
+ def NotExist(within, *within_complement, value=None):
+     """
+     Builds and returns a constraint Count that checks that no term takes the specified value.
+@@ -3066,6 +3113,7 @@ def NotExist(within, *within_complement, value=None):
+     return _count("NotExist", flatten(within, within_complement), value, None, None) == 0
+ 
+ 
++@_constants_as_integers
+ def NoneHold(within, *within_complement):
+     """
+     Builds and returns a constraint Count that checks that no term evaluates to 1 (seen as True).
+@@ -3088,6 +3136,7 @@ def NoneHold(within, *within_complement):
+     return _count("NoneHold", flatten(within, within_complement), None, None, None) == 0
+ 
+ 
++@_constants_as_integers
+ def ExactlyOne(within, *within_complement, value=None):
+     """
+     Builds and returns a constraint Count that checks that exactly one term evaluates to 1 (seen as True).
+@@ -3110,6 +3159,7 @@ def ExactlyOne(within, *within_complement, value=None):
+     return _count("ExactlyOne", flatten(within, within_complement), value, None, None) == 1
+ 
+ 
++@_constants_as_integers
+ def AtLeastOne(within, *within_complement, value=None):
+     """
+     Builds and returns a constraint Count that checks that at least one term evaluates to 1 (seen as True).
+@@ -3133,6 +3183,7 @@ def AtLeastOne(within, *within_complement, value=None):
+     return _exist("AtLeastOne", flatten(within, within_complement), value, None)
+ 
+ 
++@_constants_as_integers
+ def AtMostOne(within, *within_complement, value=None):
+     """
+     Builds and returns a constraint Count that checks that at most one term evaluates to 1 (seen as True).
+@@ -3158,6 +3209,7 @@ def AtMostOne(within, *within_complement, value=None):
+     return _count("AtMostOne", flatten(within, within_complement), value, None, None) <= 1
+ 
+ 
++@_constants_as_integers
+ def AllHold(within, *within_complement):
+     """
+     Builds and returns a constraint Count that checks that all terms evaluate to 1 (seen as True).
+@@ -3180,6 +3232,7 @@ def AllHold(within, *within_complement):
+     return _count("AllHold", terms, None, None, None) == len(terms)
+ 
+ 
++@_constants_as_integers
+ def Hamming(term, *others):
+     """
+     Builds and returns a constraint Sum, corresponding to the Hamming distance of the two specified lists.
+@@ -3208,6 +3261,7 @@ def Hamming(term, *others):
+     return Sum(lists[0][j] != lists[1][j] for j in range(len(lists[0])))
+ 
+ 
++@_constants_as_integers
+ def NValues(within, *within_complement, excepting=None, condition=None):
+     """
+     Builds and returns a component NValues (that becomes a constraint when subject to a condition).
+@@ -3288,6 +3342,7 @@ def _nvalues(terms, excepting=None, condition=None):  # terms is a flat list
+     return _wrapping_by_complete_or_partial_constraint(ctr) if condition is None else PartialConstraint.complete(ctr)
+ 
+ 
++@_constants_as_integers
+ def NotAllEqual(term, *others):
+     """
+     Builds and returns a component NValues (capturing NotAllEqual).
+@@ -3314,6 +3369,7 @@ def NotAllEqual(term, *others):
+     return _nvalues(terms) > 1
+ 
+ 
++@_constants_as_integers
+ def Cardinality(within, *within_complement, occurrences, closed=False):
+     """
+     Builds and returns a constraint Cardinality.
+@@ -3504,6 +3560,7 @@ def _extremum(name, term, others, condition):
+     return _wrapping_by_complete_or_partial_constraint((ConstraintMaximum if name == "Maximum" else ConstraintMinimum)(terms, condition))
+ 
+ 
++@_constants_as_integers
+ def Maximum(term, *others, condition=None):
+     """
+     Builds and returns a component Maximum (that becomes a constraint when subject to a condition).
+@@ -3531,6 +3588,7 @@ def Maximum(term, *others, condition=None):
+     return _extremum("Maximum", term, others, condition)
+ 
+ 
++@_constants_as_integers
+ def Minimum(term, *others, condition=None):
+     """
+     Builds and returns a component Minimum (that becomes a constraint when subject to a condition).
+@@ -3586,6 +3644,7 @@ def _extremum_arg(name, term, others, rank, condition):
+     return _wrapping_by_complete_or_partial_constraint((ConstraintMaximumArg if name == "MaximumArg" else ConstraintMinimumArg)(terms, rank, condition))
+ 
+ 
++@_constants_as_integers
+ def MaximumArg(term, *others, rank=None, condition=None):
+     """
+     Builds and returns a component MaximumArg (that becomes a constraint when subject to a condition).
+@@ -3619,6 +3678,7 @@ def MaximumArg(term, *others, rank=None, condition=None):
+     return _extremum_arg("MaximumArg", term, others, rank, condition)
+ 
+ 
++@_constants_as_integers
+ def MinimumArg(term, *others, rank=None, condition=None):
+     """
+     Builds and returns a component MinimumArg (that becomes a constraint when subject to a condition).
+@@ -3654,6 +3714,7 @@ def MinimumArg(term, *others, rank=None, condition=None):
+     return _extremum_arg("MinimumArg", term, others, rank, condition)
+ 
+ 
++@_constants_as_integers
+ def Channel(list1, list2=None, *, start_index1=0, start_index2=0):
+     """
+     Builds a constraint Channel between the two specified lists.
+@@ -3725,6 +3786,7 @@ def _avoid_mixed_list(t):  # TODO for simple lists here, and for tuples?
+                 t[i] = auxiliary().replace_int(v)
+ 
+ 
++@_constants_as_integers
+ def NoOverlap(tasks=None, *, origins=None, lengths=None, zero_ignored=True):
+     """
+     Builds and returns a constraint NoOverlap.
+@@ -3851,6 +3913,7 @@ def NoOverlap(tasks=None, *, origins=None, lengths=None, zero_ignored=True):
+     return ECtr(ConstraintNoOverlap(origins, lengths, zero_ignored))
+ 
+ 
++@_constants_as_integers
+ def Cumulative(tasks=None, *, origins=None, lengths=None, ends=None, heights=None, condition=None):
+     """
+     Builds and returns a component Cumulative (that becomes a constraint when subject to a condition).
+@@ -3956,6 +4019,7 @@ def Cumulative(tasks=None, *, origins=None, lengths=None, ends=None, heights=Non
+     return _wrapping_by_complete_or_partial_constraint(ConstraintCumulative(origins, lengths, ends, heights, Condition.build_condition(condition)))
+ 
+ 
++@_constants_as_integers
+ def BinPacking(partition, *partition_complement, sizes, limits=None, loads=None, condition=None):
+     """
+     Builds and returns a component BinPacking, which puts items of given sizes into bins.
+@@ -4016,6 +4080,7 @@ def BinPacking(partition, *partition_complement, sizes, limits=None, loads=None,
+     return _wrapping_by_complete_or_partial_constraint(ConstraintBinPacking(terms, sizes, condition=Condition.build_condition(condition)))
+ 
+ 
++@_constants_as_integers
+ def Knapsack(selection, *selection_complement, weights, wlimit=None, wcondition=None, profits, pcondition=None):
+     """
+     Builds and returns a component Knapsack, which selects items (possibly several copies of each) having weights and profits.
+@@ -4070,6 +4135,7 @@ def Knapsack(selection, *selection_complement, weights, wlimit=None, wcondition=
+     return _wrapping_by_complete_or_partial_constraint(ConstraintKnapsack(terms, weights, wcondition, profits, Condition.build_condition(pcondition)))
+ 
+ 
++@_constants_as_integers
+ def Flow(term, *others, balance, arcs, weights=None, condition=None):
+     """
+     Builds and returns a component Flow (that becomes a constraint when subject to a condition).
+@@ -4131,6 +4197,7 @@ def Flow(term, *others, balance, arcs, weights=None, condition=None):
+ ''' Constraints on Graphs'''
+ 
+ 
++@_constants_as_integers
+ def Circuit(successors, *successors_complement, start_index=0, size=None, no_self_looping=False):
+     """
+     Builds and returns a constraint Circuit.
+@@ -4189,6 +4256,7 @@ def Circuit(successors, *successors_complement, start_index=0, size=None, no_sel
+ ''' Other Constraints '''
+ 
+ 
++@_constants_as_integers
+ def Clause(variables, *variables_complement, phases=None):
+     """
+     Builds and returns a constraint Clause.
+diff --git a/pycsp3/tests/harness.py b/pycsp3/tests/harness.py
+index c48edaf4..063fae99 100644
+--- a/pycsp3/tests/harness.py
++++ b/pycsp3/tests/harness.py
+@@ -322,7 +322,8 @@ def assert_fails(r):
+         return
+     assert r.exception is not None, "the model fails without any message\n" + r.report()
+     lines = [line for line in r.stderr.splitlines() if line.strip()]
+-    frames = [i for i, line in enumerate(lines) if line.lstrip().startswith("File ")]
++    frames = [i for i, line in enumerate(lines) if line.lstrip().startswith("File ")
++              and not line.rstrip().endswith("in _constants_as_integers_wrapper")]  # the frames of the decorator of the functions of global constraints
+     location = lines[frames[-1]] if frames else ""
+     statement = lines[frames[-1] + 1].strip() if frames and frames[-1] + 1 < len(lines) else ""
+     message = lines[-1].partition(":")[2].strip()
+diff --git a/pycsp3/tests/test_constants.py b/pycsp3/tests/test_constants.py
+index 301e553a..b576855b 100644
+--- a/pycsp3/tests/test_constants.py
++++ b/pycsp3/tests/test_constants.py
+@@ -7,7 +7,7 @@
+ 
+ import pytest
+ 
+-from harness import assert_solutions, brute_force
++from harness import assert_solutions, brute_force, declared_variables
+ 
+ # a constant c whose value is 3, and a variable v (in the predicates: v)
+ CV = "c = Maximum(3, 1)\nv = Var(dom=range(-10, 11))\n"
+@@ -23,6 +23,16 @@ def test_constant_with_an_integer(run, solver, expression, value):
+     assert_solutions(r, brute_force(DV, lambda v: v == value))
+ 
+ 
++@pytest.mark.parametrize("expression, value", [
++    ("c + 1", 4), ("1 + c", 4), ("c - 1", 2), ("1 - c", -2), ("c * 2", 6), ("2 * c", 6),
++    ("c // 2", 1), ("7 // c", 2), ("c % 2", 1), ("7 % c", 1), ("c + c", 6), ("c * 2 - 1", 5),
++])
++def test_constant_with_an_integer_compared_with_an_integer(run, solver, expression, value):
++    # the result is a constant, and not an integer of Python (the comparison is not evaluated by Python as a Boolean)
++    r = run(CV + f"satisfy(({expression} == {value}) | (v == 0), ({expression} == {value + 1}) | (v == 1))", solver=solver)
++    assert_solutions(r, brute_force(DV, lambda v: v == 1))
++
++
+ @pytest.mark.parametrize("expression, value", [
+     ("-c", -3), ("+c", 3), ("abs(Minimum(-3, 1))", 3), ("abs(-c)", 3), ("-c + 5", 2),
+ ])
+@@ -40,3 +50,78 @@ def test_constant_with_a_unary_operator(run, solver, expression, value):
+ def test_constant_as_an_index(run, solver, constraint, predicate):
+     r = run(f"c = Maximum(3, 1)\nx = VarArray(size=4, dom=range(2))\nsatisfy({constraint})", solver=solver)
+     assert_solutions(r, brute_force([range(2)] * 4, predicate))
++
++
++@pytest.mark.parametrize("constraint, predicate", [
++    ("AllDifferent(c, v)", lambda *t: t[3] != 3),
++    ("AllDifferent([c, v])", lambda *t: t[3] != 3),
++    ("Count(x, value=c) == 1", lambda *t: t[:3].count(3) == 1),
++    ("Count(x, values=[c, 0]) == 1", lambda *t: sum(1 for w in t[:3] if w in (0, 3)) == 1),
++    ("Exist(x, value=c)", lambda *t: 3 in t[:3]),
++    ("Sum([c, v]) == 5", lambda *t: t[3] == 2),
++    ("Sum(x, condition=(\"eq\", c))", lambda *t: sum(t[:3]) == 3),
++    ("Sum(x[k] for k in range(c - 1)) == c", lambda *t: t[0] + t[1] == 3),
++    ("Maximum(c, v) == 4", lambda *t: t[3] == 4),
++    ("Minimum(x[0], c) == v", lambda *t: min(t[0], 3) == t[3]),
++    ("NValues(c, v) == 1", lambda *t: t[3] == 3),
++])
++def test_constant_in_global_constraints(run, solver, constraint, predicate):
++    # the constant is given as an argument of the function of a global constraint, which receives its value (t[:3] for x, t[3] for v)
++    r = run(f"c = Maximum(3, 1)\nx = VarArray(size=3, dom=range(4))\nv = Var(dom=range(5))\nsatisfy({constraint})", solver=solver)
++    assert_solutions(r, brute_force([range(4)] * 3 + [range(5)], predicate))
++
++
++def test_constant_in_global_constraints_with_comments(run):
++    # the comments of the model are kept for the functions of global constraints, whose arguments are checked by a decorator
++    r = run("c = Maximum(3, 1)\nx = VarArray(size=3, dom=range(4))\nsatisfy(\n    # all different\n    AllDifferent(x),\n"
++            "    # sum\n    Sum(x) > c\n)")
++    assert r.ok, r.report()
++    assert r.xml.find(".//allDifferent").get("note") == "all different", r.report()
++    assert r.xml.find(".//sum").get("note") == "sum", r.report()
++
++
++@pytest.mark.parametrize("constraint, predicate", [
++    ("v in [c, 4]", lambda *t: t[3] in (3, 4)),
++    ("v not in [c, 4]", lambda *t: t[3] not in (3, 4)),
++    ("v + 1 in [c, 4]", lambda *t: t[3] + 1 in (3, 4)),
++    ("v in L", lambda *t: t[3] in (3, 4)),
++    ("Sum(x) in [c, 4]", lambda *t: sum(t[:3]) in (3, 4)),
++    ("Sum(x) in L", lambda *t: sum(t[:3]) in (3, 4)),
++    ("c in x", lambda *t: 3 in t[:3]),
++    ("c not in x", lambda *t: 3 not in t[:3]),
++    ("(c in [1, 3]) | (v == 0)", lambda *t: True),
++    ("(c in cp_array([1, 2])) | (v == 0)", lambda *t: t[3] == 0),
++])
++def test_constant_in_memberships(run, solver, constraint, predicate):
++    # the constant is the value searched for, or among the values (t[:3] for x, t[3] for v); v != 4 is posted too, so that the model has a
++    # constraint (and is solved) when the membership is always true
++    r = run(f"c = Maximum(3, 1)\nx = VarArray(size=3, dom=range(4))\nv = Var(dom=range(5))\nL = [c, 4]\nsatisfy(v != 4, {constraint})", solver=solver)
++    assert_solutions(r, brute_force([range(4)] * 3 + [range(5)], lambda *t: t[3] != 4 and predicate(*t)))
++
++
++def mjk(t, j, k):
++    """The value of m[j][k] in a tuple whose first six values are the ones of m."""
++    return t[3 * j + k]
++
++
++MI = ((1, 2, 3), (4, 5, 6))
++
++
++@pytest.mark.parametrize("constraint, predicate", [
++    ("m[j][c] == v", lambda *t: mjk(t, t[6], 1) == t[8]),
++    ("m[j][c - 1] == v", lambda *t: mjk(t, t[6], 0) == t[8]),
++    ("mi[j][c] == v", lambda *t: MI[t[6]][1] == t[8]),
++    ("m[c, k] == v", lambda *t: mjk(t, 1, t[7]) == t[8]),
++    ("m[j, c] == v", lambda *t: mjk(t, t[6], 1) == t[8]),
++    ("m[c, 1] == v", lambda *t: mjk(t, 1, 1) == t[8]),
++    ("m[c, c] == v", lambda *t: mjk(t, 1, 1) == t[8]),
++    ("mi[c, k] == v", lambda *t: MI[1][t[7]] == t[8]),
++    ("mi[j, c] == v", lambda *t: MI[t[6]][1] == t[8]),
++])
++def test_constant_as_an_index_of_a_matrix(run, solver, constraint, predicate):
++    # the constant c is 1, as the index of a row or of a column, without any auxiliary variable (t[:6] for m, t[6] for j, t[7] for k, t[8] for v)
++    r = run("c = Maximum(1, 0)\nm = VarArray(size=[2, 3], dom=range(2))\nmi = cp_array([[1, 2, 3], [4, 5, 6]])\nj = Var(dom=range(2))\n"
++            f"k = Var(dom=range(3))\nv = Var(dom=range(7))\nsatisfy({constraint})", solver=solver)
++    assert_solutions(r, brute_force([range(2)] * 6 + [range(2), range(3), range(7)], predicate))
++    assert not any(name.startswith("aux") for name in declared_variables(r)), r.report()
++
+diff --git a/pycsp3/tests/test_constraints_global_element.py b/pycsp3/tests/test_constraints_global_element.py
+index ac6dd657..a6ce53f3 100644
+--- a/pycsp3/tests/test_constraints_global_element.py
++++ b/pycsp3/tests/test_constraints_global_element.py
+@@ -1,7 +1,8 @@
+ """
+ Tests of the constraint Element of the section Constraints (Global) of the API (https://pycsp.org/documentation/api/constraints-global/#Element):
+ expressions of the form c[i] (a list of integers indexed by a variable) and m[j][k] (a matrix of integers indexed by two variables), when all the
+-integers are identical, with conditions, in logical expressions, as terms of other constraints and in objectives.
++integers are identical, with conditions, in logical expressions, as terms of other constraints and in objectives; and the constraint Element
++without index (member), written v in [...] with a list of variables (and possibly integers).
+ 
+ Each constraint is solved with ACE, CHOCO and COSOCO, all the solutions being compared with the ones computed by brute force.
+ According to XCSP3-core, element(X, i, (op, k)) holds iff X[i] op k, the first index being 0; when all the integers of X are equal to the same
+@@ -10,11 +11,11 @@
+ 
+ import pytest
+ 
+-from harness import assert_optimum, assert_solutions, brute_force, bug
++from harness import assert_optimum, assert_solutions, brute_force, bug_for
+ 
+-# Known bugs (each bug is reported in the issue given at the start of its reason)
+-IDENTICAL = ("#281: a list of identical integers indexed by a variable is replaced by this integer, so that c[i] == 2 (two integers "
+-             "compared by Python) fails, and c[i] cannot be an objective")
++# Known bugs of the solvers
++EMPTY_SUPPORTS = ("(to be reported) ACE and CHOCO fail on a table with an empty set of supports, recognized as false by the parser "
++                  "(buildCtrFalse(): RuntimeException: Constraint with only conflicts)")
+ 
+ # a list of identical integers c, an index i and a variable v (in the predicates: t[0] for i, t[1] for v)
+ C3 = "c = cp_array([2, 2, 2])\ni = Var(dom=range(3))\nv = Var(dom=range(5))\n"
+@@ -27,32 +28,43 @@ def check(run, solver, code, domains, predicate):
+     return r
+ 
+ 
++# the constraints always false (a table with an empty set of supports is posted)
++ALWAYS_FALSE = ("c[i] == 3", "c[i] != 2", "c[i] not in {1, 2}", "~(c[i] == 2)", "m[j, k] == 3")
++
++
++def check_with_v(run, solver, request, code, constraint, domains, predicate, iv):
++    # v != 4 is posted too, so that the model has a constraint (and is solved) when the constraint is always true (t[iv] for v)
++    if constraint in ALWAYS_FALSE:
++        bug_for(request, ("ACE", "CHOCO"), EMPTY_SUPPORTS)
++    check(run, solver, code + f"satisfy(v != 4, {constraint})", domains, lambda *t: t[iv] != 4 and predicate(*t))
++
++
+ @pytest.mark.parametrize("constraint, predicate", [
+     ("c[i] == v", lambda *t: t[1] == 2),
+     ("c[i] != v", lambda *t: t[1] != 2),
+     ("c[i] < v", lambda *t: 2 < t[1]),
+     ("c[i] + v == 5", lambda *t: t[1] == 3),
+     ("-c[i] + v == 0", lambda *t: t[1] == 2),
+-    pytest.param("c[i] == 2", lambda *t: True, marks=bug(IDENTICAL)),
+-    pytest.param("c[i] == 3", lambda *t: False, marks=bug(IDENTICAL)),
+-    pytest.param("c[i] != 2", lambda *t: False, marks=bug(IDENTICAL)),
+-    pytest.param("c[i] < 3", lambda *t: True, marks=bug(IDENTICAL)),
+-    pytest.param("c[i] in {1, 2}", lambda *t: True, marks=bug(IDENTICAL)),
+-    pytest.param("c[i] not in {1, 2}", lambda *t: False, marks=bug(IDENTICAL)),
++    ("c[i] == 2", lambda *t: True),
++    ("c[i] == 3", lambda *t: False),
++    ("c[i] != 2", lambda *t: False),
++    ("c[i] < 3", lambda *t: True),
++    ("c[i] in {1, 2}", lambda *t: True),
++    ("c[i] not in {1, 2}", lambda *t: False),
+ ])
+-def test_element_on_identical_integers(run, solver, constraint, predicate):
+-    check(run, solver, C3 + f"satisfy({constraint})", DC, predicate)
++def test_element_on_identical_integers(run, solver, request, constraint, predicate):
++    check_with_v(run, solver, request, C3, constraint, DC, predicate, 1)
+ 
+ 
+ @pytest.mark.parametrize("constraint, predicate", [
+     ("(c[i] == v) | (v == 0)", lambda *t: t[1] in (0, 2)),
+-    pytest.param("(c[i] == 2) | (v == 1)", lambda *t: True, marks=bug(IDENTICAL)),
++    ("(c[i] == 2) | (v == 1)", lambda *t: True),
+     ("(c[i] == 3) | (v == 1)", lambda *t: t[1] == 1),
+-    pytest.param("~(c[i] == 2)", lambda *t: False, marks=bug(IDENTICAL)),
+-    pytest.param("If(v == 1, Then=c[i] == 3)", lambda *t: t[1] != 1, marks=bug(IDENTICAL)),
++    ("~(c[i] == 2)", lambda *t: False),
++    ("If(v == 1, Then=c[i] == 3)", lambda *t: t[1] != 1),
+ ])
+-def test_element_on_identical_integers_in_logical_expressions(run, solver, constraint, predicate):
+-    check(run, solver, C3 + f"satisfy({constraint})", DC, predicate)
++def test_element_on_identical_integers_in_logical_expressions(run, solver, request, constraint, predicate):
++    check_with_v(run, solver, request, C3, constraint, DC, predicate, 1)
+ 
+ 
+ @pytest.mark.parametrize("constraint, predicate", [
+@@ -76,21 +88,20 @@ def test_element_on_identical_integers_as_a_term(run, solver, constraint, predic
+ 
+ @pytest.mark.parametrize("matrix, constraint, predicate", [
+     ("[[2, 2, 2], [2, 2, 2]]", "m[j][k] == v", lambda *t: t[2] == 2),
+-    pytest.param("[[2, 2, 2], [2, 2, 2]]", "m[j][k] == 2", lambda *t: True, marks=bug(IDENTICAL)),
+-    pytest.param("[[2, 2, 2], [2, 2, 2]]", "m[j, k] == 3", lambda *t: False, marks=bug(IDENTICAL)),
++    ("[[2, 2, 2], [2, 2, 2]]", "m[j][k] == 2", lambda *t: True),
++    ("[[2, 2, 2], [2, 2, 2]]", "m[j, k] == 3", lambda *t: False),
+     ("[[1, 2, 3], [1, 2, 3]]", "m[j][k] == v", lambda *t: t[2] == t[1] + 1),  # identical rows, whose integers are different
+ ])
+-def test_element_on_a_matrix_of_identical_integers(run, solver, matrix, constraint, predicate):
+-    check(run, solver, f"m = cp_array({matrix})\n" + JKV + f"satisfy({constraint})", DM, predicate)
++def test_element_on_a_matrix_of_identical_integers(run, solver, request, matrix, constraint, predicate):
++    check_with_v(run, solver, request, f"m = cp_array({matrix})\n" + JKV, constraint, DM, predicate, 2)
+ 
+ 
+-@bug(IDENTICAL)
+-def test_element_on_a_list_of_one_integer(run, solver):
+-    check(run, solver, "c = cp_array([2])\nk = Var(dom={0})\nv = Var(dom=range(5))\nsatisfy(c[k] == 2)", [[0], range(5)], lambda *t: True)
++def test_element_on_a_list_of_one_integer(run, solver, request):
++    check_with_v(run, solver, request, "c = cp_array([2])\nk = Var(dom={0})\nv = Var(dom=range(5))\n", "c[k] == 2", [[0], range(5)], lambda *t: True, 1)
+ 
+ 
+ @pytest.mark.parametrize("objective, function", [
+-    pytest.param("minimize(c[i])", lambda *t: 2, marks=bug(IDENTICAL)),
++    ("minimize(c[i])", lambda *t: 2),
+     ("minimize(c[i] + v)", lambda *t: 2 + t[1]),
+ ])
+ def test_element_on_identical_integers_as_objective(run, solver, objective, function):
+@@ -100,3 +111,17 @@ def test_element_on_identical_integers_as_objective(run, solver, objective, func
+         assert "The objective is the constant 2: there is nothing to optimize" in r.stdout, r.report()
+     else:
+         assert_optimum(r, brute_force(DC, lambda *t: t[1] != 0), function)
++
++
++@pytest.mark.parametrize("constraint, predicate", [
++    ("v in [x[0], x[1]]", lambda *t: t[3] in t[:2]),
++    ("v in [x[0], 2]", lambda *t: t[3] in (t[0], 2)),
++    ("v not in [x[0], 2]", lambda *t: t[3] not in (t[0], 2)),
++    ("v + 1 in [x[0], 2]", lambda *t: t[3] + 1 in (t[0], 2)),
++    ("v in L", lambda *t: t[3] in (t[0], 2)),
++    ("v in [x[0], x[1], x[2], 4]", lambda *t: t[3] in t[:3] + (4,)),
++])
++def test_element_member_of_a_list_written_literally(run, solver, constraint, predicate):
++    # Python changes into a tuple a list given literally on the right of 'in' (t[:3] for x, t[3] for v)
++    check(run, solver, f"x = VarArray(size=3, dom=range(4))\nv = Var(dom=range(5))\nL = [x[0], 2]\nsatisfy({constraint})", [range(4)] * 3 + [range(5)],
++          predicate)
+diff --git a/pycsp3/tools/curser.py b/pycsp3/tools/curser.py
+index c9b4c92e..bae5a4ab 100644
+--- a/pycsp3/tools/curser.py
++++ b/pycsp3/tools/curser.py
+@@ -46,6 +46,10 @@ def _replace_node_in(node, values):
+     return auxiliary().replace_node(node)
+ 
+ 
++def at_least_one_variable_and_possibly_integers(t):  # as the values of v in [x[0], 2]
++    return len(t) > 0 and all(isinstance(w, (Variable, int)) for w in t) and any(isinstance(w, Variable) for w in t)
++
++
+ def _set_contains(self, other):  # for being able to use 'in' when expressing intension/extension constraints
+     if not OpOverrider.activated:
+         return self.__contains__(other)
+@@ -118,6 +122,8 @@ def _tuple_contains(self, other):  # for being able to use 'in' when expressing
+         if isinstance(other, ConstraintDummyConstant):  # a constant (as the count of no term), evaluated when the constraint is posted
+             queue_in.append((self, other))
+             return True
++        if not isinstance(other, (tuple, list, types.GeneratorType)) and any(isinstance(t, ConstraintDummyConstant) for t in self):
++            self = tuple(t.val if isinstance(t, ConstraintDummyConstant) else t for t in self)  # constants among the values, as in v in (c, 4)
+         if isinstance(other, ScalarProduct):
+             other = other.to_partial_sum()
+         # if len(self) == 0:
+@@ -136,6 +142,11 @@ def _tuple_contains(self, other):  # for being able to use 'in' when expressing
+         if isinstance(other, int) and (is_1d_list(self, Variable) or is_1d_tuple(self, Variable)) and len(self) > 0:  # member/element constraint
+             queue_in.append((self, other))
+             return True
++        if isinstance(other, Variable) and len(self) > 0 and is_1d_tuple(self, Variable):  # member constraint, as for a list
++            queue_in.append((list(self), other))
++            return True
++        if isinstance(other, (Variable, Node)) and at_least_one_variable_and_possibly_integers(self):
++            return _set_contains(set(self), other)  # variables and integers, handled as a set
+         return self.__contains__(other)
+ 
+     # def _list_getitem(self, other):
+@@ -151,6 +162,8 @@ def _list_contains(self, other):  # for being able to use 'in' when expressing e
+         if isinstance(other, ConstraintDummyConstant):  # a constant (as the count of no term), evaluated when the constraint is posted
+             queue_in.append((self, other))
+             return True
++        if not isinstance(other, (tuple, list, types.GeneratorType)) and any(isinstance(t, ConstraintDummyConstant) for t in self):
++            self = [t.val if isinstance(t, ConstraintDummyConstant) else t for t in self]  # constants among the values, as in v in [c, 4]
+         if isinstance(other, ScalarProduct):
+             other = other.to_partial_sum()
+         # if len(self) == 0:
+@@ -177,6 +190,8 @@ def _list_contains(self, other):  # for being able to use 'in' when expressing e
+             if is_1d_list(self, Variable):
+                 queue_in.append((self, other))
+                 return True
++        if isinstance(other, (Variable, Node)) and at_least_one_variable_and_possibly_integers(self):
++            return _set_contains(set(self), other)  # variables and integers, handled as a set
+         error_if(is_containing(other, Variable),
+                  "It seems that you should use a set and not a list, as in x in {...}." + " Your arguments are " + str(other) + " " + str(self))
+         if isinstance(other, int) and (is_1d_list(self, Variable) or is_1d_tuple(self, Variable)) and len(self) > 0:  # member/element constraint
+@@ -829,6 +844,10 @@ def __int_tuples_of_same_size(m):
+ 
+         if isinstance(indexes, str) and functions.var(indexes) is not None:
+             indexes = functions.var(indexes)
++        if isinstance(indexes, ConstraintDummyConstant):
++            indexes = indexes.val
++        elif isinstance(indexes, tuple) and any(isinstance(i, ConstraintDummyConstant) for i in indexes):
++            indexes = tuple(i.val if isinstance(i, ConstraintDummyConstant) else i for i in indexes)  # as in m[c, j]
+         if isinstance(indexes, int):
+             assert isinstance(array, list) and len(array) > 0
+             if indexes >= len(array):
+@@ -912,13 +931,14 @@ def __int_tuples_of_same_size(m):
+         if isinstance(indexes, Variable):
+             if indexes.dom.is_infinite():
+                 indexes.dom = Domain(range(len(array)))
+-            if isinstance(array, ListInt):
+-                if is_1d_list(array, int):
+-                    if all(array[0] == v for v in array):
+-                        return array[0] #ConstraintDummyConstant(array[0])
+-                elif is_2d_list(array, int):
+-                    if all(array[0] == t for t in array):  # all rows are identical
+-                        return array[0]
++            if isinstance(array, ListInt) and (is_1d_list(array, int) or is_2d_list(array, int)):
++                if all(array[0] == t for t in array):  # all integers (or all rows) are identical
++                    # with identical integers, c[i] is a constant; for example, with c = [2, 2, 2]:
++                    #  - c[i] == 2 calls ConstraintDummyConstant.__eq__(2) and gives ConstraintDummyConstant(1): always true, no constraint is posted
++                    #  - c[i] == 3 gives ConstraintDummyConstant(0): always false, the model is unsatisfiable
++                    #  - c[i] == v builds the node eq(v,2)
++                    #  - minimize(c[i]) gives the message of #221: "The objective is the constant 2"
++                    return ConstraintDummyConstant(array[0]) if isinstance(array[0], int) else array[0]
+             return PartialConstraint(ConstraintElement(array, index=indexes))
+         if isinstance(indexes, tuple):
+             assert len(indexes) > 1
+@@ -1012,7 +1032,7 @@ def __rmul__(self, other):
+         return ListInt.__mul__(other, self)
+ 
+     def __contains__(self, other):
+-        if isinstance(other, PartialConstraint):
++        if isinstance(other, (PartialConstraint, ConstraintDummyConstant)):  # a constant is evaluated when the constraint is posted
+             queue_in.append((list(self), other))
+             return True
+         if len(self) == 0 and isinstance(other, Variable):
+@@ -1085,6 +1105,8 @@ def __mul__(self, other):
+     __rmul__ = __mul__
+ 
+     def __contains__(self, other):
++        if isinstance(other, ConstraintDummyConstant):
++            other = other.val
+         if isinstance(other, (int, Variable)):  # member constraint
+             queue_in.append((self, other))
+             return True
+diff --git a/pycsp3/tools/inspector.py b/pycsp3/tools/inspector.py
+index 1c4ccfba..d2a1b1f5 100644
+--- a/pycsp3/tools/inspector.py
++++ b/pycsp3/tools/inspector.py
+@@ -116,11 +116,15 @@ def browse_code_top_to_bottom(lines, function_name):
+     return list(reversed(code))
+ 
+ 
++decorator_wrappers = set()  # the code of the wrappers of the decorators of PyCSP3, whose frames are not the ones of the calls in the model
++
++
+ def _extract_correct_frame(function_name):
+     for i, frame_info in enumerate(reversed(inspect.stack(context=1))):
+         if i > 0 and (frame_info.function == function_name or frame_info.function == "__init__" and function_name in frame_info.code_context[0]):
+-            return i - 1, previous  # Get the correct frame
+-        previous = frame_info
++            return index, previous  # Get the correct frame
++        if frame_info.frame.f_code not in decorator_wrappers:
++            index, previous = i, frame_info
+     return None
+ 
+ 

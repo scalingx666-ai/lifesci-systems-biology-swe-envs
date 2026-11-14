@@ -1,0 +1,13 @@
+diff --git a/vignettes/msigdbr-intro.Rmd b/vignettes/msigdbr-intro.Rmd
+index 5a410a4..89b6870 100644
+--- a/vignettes/msigdbr-intro.Rmd
++++ b/vignettes/msigdbr-intro.Rmd
+@@ -95,7 +95,7 @@ Use the gene sets data frame for `clusterProfiler` (for genes as gene symbols).
+ 
+ ```{r cp-symbols, eval=FALSE}
+ m_t2g = m_df %>% dplyr::select(gs_name, gene_symbol) %>% as.data.frame()
+-enricher(gene = genes_symbols, TERM2GENE = m_t2g, ...)
++enricher(gene = gene_symbol, TERM2GENE = m_t2g, ...)
+ ```
+ 
+ Use the gene sets data frame for `fgsea`.

@@ -1,0 +1,70 @@
+version = "1.0"
+
+[task]
+name = "default/Future-House__LAB-Bench-10"
+description = "Fix: chembench install"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "LAB-Bench",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Future-House/LAB-Bench"
+ref = "5aea1fe6f4162453025ac0526b7483dc4af5fa07"
+reference = "https://github.com/Future-House/LAB-Bench/pull/10"
+source_access = "auto"
+built_at = "2026-11-14T07:01:17.629501+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:65fb4e7f8396b22265f463acab51d02a445e10a926e35575b2ee57b463e22bc1"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-06-12T22:55:58Z"
+diff_format = "unified"
+context_files = [
+    "labbench/__init__.py",
+    "labbench/anthropic_utils.py",
+    "labbench/anyscale.py",
+    "labbench/evaluator.py",
+    "labbench/openai_utils.py",
+    "labbench/vertex.py",
+    "labbench/zero_shot.py",
+    "pyproject.toml",
+    "uv.lock",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 1030
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

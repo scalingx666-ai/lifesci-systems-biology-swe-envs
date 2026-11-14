@@ -1,0 +1,95 @@
+diff --git a/changelog.d/+rdataview-refcycle.performance.md b/changelog.d/+rdataview-refcycle.performance.md
+new file mode 100644
+index 0000000000..341d3d1df6
+--- /dev/null
++++ b/changelog.d/+rdataview-refcycle.performance.md
+@@ -0,0 +1,6 @@
++`ReturnDataView` no longer forms a reference cycle with its `xr` accessor.
++`ReturnDataView`s, and the `ReturnData` they hold, are now freed as soon as
++they are no longer referenced, instead of only by Python's cyclic garbage
++collector. Before, dropped simulation results could accumulate across many
++`run_simulations` calls, e.g. during parameter estimation, until the next
++full garbage collection.
+diff --git a/python/sdist/amici/sim/sundials/_numpy.py b/python/sdist/amici/sim/sundials/_numpy.py
+index 185ab0047e..27de8168c8 100644
+--- a/python/sdist/amici/sim/sundials/_numpy.py
++++ b/python/sdist/amici/sim/sundials/_numpy.py
+@@ -466,9 +466,24 @@ def __init__(self, rdata: ReturnDataPtr | ReturnData):
+             "num_err_test_fails_b": [rdata.nt],
+             "num_non_lin_solv_conv_fails_b": [rdata.nt],
+         }
+-        self.xr = XArrayFactory(self)
+         super().__init__(rdata)
+ 
++    @property
++    def xr(self) -> XArrayFactory:
++        """
++        Access fields as :class:`xarray.DataArray` with labeled coordinates,
++        e.g. ``rdata.xr.x``.
++
++        A new factory is created on each access, so that the factory's
++        reference to this view does not form a reference cycle that would
++        keep this view and the underlying ``ReturnData`` alive until the
++        next cyclic garbage collection.
++        """
++        return XArrayFactory(self)
++
++    def __dir__(self):
++        return sorted(set(super().__dir__()) | {"xr"})
++
+     def __getitem__(
+         self, item: str
+     ) -> np.ndarray | ReturnDataPtr | ReturnData | float | int | list:
+diff --git a/python/tests/test_swig_interface.py b/python/tests/test_swig_interface.py
+index c20ecda258..0b4d6f4790 100644
+--- a/python/tests/test_swig_interface.py
++++ b/python/tests/test_swig_interface.py
+@@ -4,9 +4,11 @@
+ """
+ 
+ import copy
++import gc
+ import numbers
+ import pickle
+ import sys
++import weakref
+ from math import nan
+ 
+ import amici
+@@ -628,6 +630,7 @@ def test_rdataview(sbml_example_presimulation_module):
+ 
+     # field names are included by dir()
+     assert "x" in dir(rdata)
++    assert "xr" in dir(rdata)
+ 
+     # Test xarray conversion
+     xr_x = rdata.xr.x
+@@ -715,6 +718,28 @@ def test_rdata_ids(sbml_example_presimulation_module):
+     assert rdata.expression_ids == model.get_expression_ids()
+ 
+ 
++def test_rdataview_freed_without_gc(sbml_example_presimulation_module):
++    """A ReturnDataView and its ReturnData are freed by reference counting,
++    without waiting for the cyclic garbage collector."""
++    model = sbml_example_presimulation_module.get_model()
++    model.set_timepoints([1, 2, 3])
++    solver = model.create_solver()
++
++    gc_was_enabled = gc.isenabled()
++    gc.disable()
++    try:
++        rdata = run_simulation(model, solver)
++        _ = rdata.xr.x
++        rdata_ref = weakref.ref(rdata)
++        swigptr_ref = weakref.ref(rdata._swigptr)
++        del rdata
++        assert rdata_ref() is None
++        assert swigptr_ref() is None
++    finally:
++        if gc_was_enabled:
++            gc.enable()
++
++
+ def test_python_exceptions(sbml_example_presimulation_module):
+     """Test that C++ exceptions are correctly caught and re-raised in Python."""
+     from amici.sim.sundials import run_simulation

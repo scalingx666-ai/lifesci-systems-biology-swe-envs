@@ -1,0 +1,67 @@
+version = "1.0"
+
+[task]
+name = "default/opencobra__cobrapy-1499"
+description = "fix: handle empty internal selections in loopless analysis"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "cobrapy",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "opencobra/cobrapy"
+ref = "fdbcc96fde1e73856e5f948c9b3114c3c0258d42"
+reference = "https://github.com/opencobra/cobrapy/pull/1499"
+source_access = "auto"
+built_at = "2026-11-14T06:57:26.637128+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:83ea1592e7b89440149d6395c3583748b33c02401f15a51f5488fe3ba6b430ae"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-10T13:49:02Z"
+diff_format = "unified"
+context_files = [
+    "release-notes/next-release.md",
+    "src/cobra/flux_analysis/find_cyclic_reactions.py",
+    "src/cobra/flux_analysis/loopless.py",
+    "tests/test_flux_analysis/test_find_cyclic_reactions.py",
+    "tests/test_flux_analysis/test_loopless.py",
+    "tests/test_flux_analysis/test_variability.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 113
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

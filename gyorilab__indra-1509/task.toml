@@ -1,0 +1,69 @@
+version = "1.0"
+
+[task]
+name = "default/gyorilab__indra-1509"
+description = "Pubmed and pmc clients updates"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "indra",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "gyorilab/indra"
+ref = "040f9efe56576e481f58c5cf68f13680ef5b2b77"
+reference = "https://github.com/gyorilab/indra/pull/1509"
+source_access = "auto"
+built_at = "2026-11-14T07:00:52.019870+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:1b830aa124a6f230b82596cb7b8d4c022893ab15f0b59b2ab972964f53f43760"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-06-30T16:39:03Z"
+diff_format = "unified"
+context_files = [
+    "indra/literature/__init__.py",
+    "indra/literature/adeft_tools.py",
+    "indra/literature/pmc_client.py",
+    "indra/literature/pubmed_client.py",
+    "indra/sources/reach/api.py",
+    "indra/tests/test_adeft_tools.py",
+    "indra/tests/test_pmc_client.py",
+    "indra/tests/test_rlimsp.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 231
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

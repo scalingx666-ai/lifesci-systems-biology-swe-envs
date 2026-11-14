@@ -1,0 +1,176 @@
+diff --git a/.github/workflows/ccpp.yml b/.github/workflows/ccpp.yml
+deleted file mode 100644
+index 4cea7b64f..000000000
+--- a/.github/workflows/ccpp.yml
++++ /dev/null
+@@ -1,79 +0,0 @@
+-name: C/C++ CI
+-
+-on: [push]
+-
+-jobs:
+-  build:
+-    runs-on: ubuntu-latest
+-
+-    steps:
+-    - name: Checkout
+-      uses: actions/checkout@v1
+-      with:
+-        submodules: true
+-
+-    - name: deps
+-      run: |
+-        sudo apt-get update
+-        sudo apt-get install -y wget bzip2 python3-pip libgsl-dev libboost-dev
+-        sudo python3 -m pip install -U pip setuptools
+-
+-    - name: Download hdf5
+-      run: wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.4/src/hdf5-1.10.4.tar.bz2
+-
+-    - name: Cache hdf5
+-      id: cache-hdf5
+-      uses: actions/cache@v1
+-      with:
+-        path: hdf5-1.10.4
+-        key: ${{ runner.OS }}-build-${{ hashFiles('hdf5-1.10.4.tar.bz2') }}
+-
+-    - name: Build hdf5
+-      if: steps.cache-hdf5.outputs.cache-hit != 'true'
+-      run: |
+-        tar xf hdf5-1.10.4.tar.bz2
+-        cd hdf5-1.10.4
+-        ./configure --enable-cxx --prefix=/opt/hdf5
+-        make
+-        cd ..
+-
+-    - name: Install hdf5
+-      run: cd hdf5-1.10.4 && sudo make install && cd ..
+-
+-    - name: setuppy
+-      run: |
+-        export HDF5_ROOT=/opt/hdf5
+-        export LD_LIBRARY_PATH=/opt/hdf5/lib
+-        python3 setup.py build
+-        python3 setup.py test
+-        sudo python3 setup.py install
+-
+-    - name: import_test
+-      run: |
+-        export LD_LIBRARY_PATH=/opt/hdf5/lib
+-        python3 -c "from ecell4_base import core"
+-
+-  build-for-macos:
+-    runs-on: macos-latest
+-
+-    steps:
+-    - name: Checkout
+-      uses: actions/checkout@v1
+-      with:
+-        submodules: true
+-
+-    - name: Install dependencies
+-      run: |
+-          brew uninstall openssl@1.0.2t
+-          brew uninstall python@2.7.17
+-          brew untap local/openssl
+-          brew untap local/python2
+-          brew update
+-          brew upgrade
+-          brew install boost gsl hdf5 cmake python
+-
+-    - name: Build and Install ecell4_base
+-      run: /usr/local/bin/python3 setup.py install
+-
+-    - name: Test ecell4_base
+-      run: /usr/local/bin/python3 setup.py test
+diff --git a/.github/workflows/wheels.yml b/.github/workflows/wheels.yml
+index f3f9c6e2b..97af108ca 100644
+--- a/.github/workflows/wheels.yml
++++ b/.github/workflows/wheels.yml
+@@ -10,7 +10,7 @@ jobs:
+       contents: read
+     strategy:
+       matrix:
+-        os: [ubuntu-latest]
++        os: [ubuntu-latest, macos-15-intel]
+ 
+     steps:
+       - uses: actions/checkout@v5
+@@ -25,6 +25,8 @@ jobs:
+ 
+       - name: Build wheels
+         run: python -m cibuildwheel --output-dir wheelhouse
++        env:
++          MACOSX_DEPLOYMENT_TARGET: "14.0"
+         # to supply options, put them in 'env', like:
+         # env:
+         #   CIBW_SOME_OPTION: value
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b202e2556..375a28f89 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,7 +1,8 @@
+ cmake_minimum_required(VERSION 3.14)
+ project(ecell4 VERSION 4.0 LANGUAGES C CXX)
+ 
+-set(CMAKE_CXX_STANDARD 11)
++set(CMAKE_CXX_STANDARD 14)
++set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -pg -O0 -Wall")
+ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O2")
+diff --git a/ecell4/egfrd/generator.hpp b/ecell4/egfrd/generator.hpp
+index 8b66fad94..4732045ff 100644
+--- a/ecell4/egfrd/generator.hpp
++++ b/ecell4/egfrd/generator.hpp
+@@ -81,7 +81,7 @@ template<typename Trange_,
+          bool Bra_ =
+             std::is_convertible<
+                 typename boost::iterator_category_to_traversal<
+-                    typename boost::BOOST_ITERATOR_CATEGORY<Titer_>::type
++                    typename std::iterator_traits<Titer_>::iterator_category
+                     >::type,
+                 boost::random_access_traversal_tag>::value>
+ class range_generator: public abstract_limited_generator<Tresult_>
+diff --git a/ecell4/egfrd/utils/range.hpp b/ecell4/egfrd/utils/range.hpp
+index 023286d6e..8eb508158 100644
+--- a/ecell4/egfrd/utils/range.hpp
++++ b/ecell4/egfrd/utils/range.hpp
+@@ -15,20 +15,21 @@
+ #include <boost/iterator/transform_iterator.hpp>
+ #include <boost/iterator/filter_iterator.hpp>
+ 
++#include <iterator>
++
+ namespace ecell4
+ {
+ namespace egfrd
+ {
+ 
+ template<typename Trange_>
+-struct range_iterator_category
+-    : boost::BOOST_ITERATOR_CATEGORY<typename boost::range_iterator<Trange_>::type> {};
++using iterator_category = typename std::iterator_traits<typename boost::range_iterator<Trange_>::type>::iterator_category;
+ 
+ template<typename Trange_, typename Ticat_>
+ struct check_range_iterator_category
+     : std::is_convertible<
+         typename boost::iterator_category_to_traversal<
+-            typename range_iterator_category<Trange_>::type >::type,
++            typename boost::iterator_traversal<typename boost::range_iterator<Trange_>::type>::type >::type,
+         typename boost::iterator_category_to_traversal<Ticat_>::type > {};
+ 
+ template<typename Trange_>
+diff --git a/setup.py b/setup.py
+index 0aad5a27f..0d2e7808c 100644
+--- a/setup.py
++++ b/setup.py
+@@ -106,7 +106,7 @@ def run(self):
+ 
+ setup(
+     name='ecell4_base',
+-    version = '2.1.1',
++    version = '2.1.2',
+     license = "the GNU General Public License v2",
+     author = "Kazunari Kaizu",
+     author_email = "kaizu@riken.jp",

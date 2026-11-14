@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/pinellolab__dictys-90"
+description = "Bump actions/github-script from 8 to 9"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "dictys",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "pinellolab/dictys"
+ref = "6a3a4220cc2904da1f502f6884932c7c2a09cff4"
+reference = "https://github.com/pinellolab/dictys/pull/90"
+source_access = "auto"
+built_at = "2026-11-14T07:19:20.236378+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:32816706f3f61560d2de37c84c718f6601797e6562174405325e4ad15d4d093f"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-04-14T03:37:47Z"
+diff_format = "unified"
+context_files = [
+    ".github/workflows/ci-install.yml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

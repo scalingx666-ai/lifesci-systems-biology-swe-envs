@@ -1,0 +1,67 @@
+version = "1.0"
+
+[task]
+name = "default/Noble-Lab__HiCFoundation-9"
+description = "Pytest Unit Tests"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "HiCFoundation",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Noble-Lab/HiCFoundation"
+ref = "6defc313579cd0cab246aadb0caa59c765a68a1a"
+reference = "https://github.com/Noble-Lab/HiCFoundation/pull/9"
+source_access = "auto"
+built_at = "2026-11-14T07:04:03.329494+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:4c7aa8f6e4696549e4832743c15a2c75906ffd426b19a7f28598a314563fd850"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-07-09T03:34:24Z"
+diff_format = "unified"
+context_files = [
+    ".gitignore",
+    "test/test_convert_rgb.py",
+    "test/test_forward.py",
+    "test/test_loss.py",
+    "test/test_masking.py",
+    "test/test_patchify.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 727
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

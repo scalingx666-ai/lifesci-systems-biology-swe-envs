@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/ICB-DCM__pyPESTO-1808"
+description = "GHA fix for CI"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "pyPESTO",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "ICB-DCM/pyPESTO"
+ref = "98cf21e101202b14dba5fc0b0adbdc05cd4f4871"
+reference = "https://github.com/ICB-DCM/pyPESTO/pull/1808"
+source_access = "auto"
+built_at = "2026-11-14T07:00:50.289684+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:dcb3ade93cb0e05ab41fc147880d31de2cd51a5c9411972707e378cb5a49ce9c"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-02T16:54:46Z"
+diff_format = "unified"
+context_files = [
+    ".github/actions/setup-tox/action.yml",
+    ".github/workflows/install_deps.sh",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 22
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

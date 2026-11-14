@@ -1,0 +1,67 @@
+version = "1.0"
+
+[task]
+name = "default/ICB-DCM__pyPESTO-1810"
+description = "Update benchmark problems repository URL"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "pyPESTO",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "ICB-DCM/pyPESTO"
+ref = "2789dc6bd9a34af1e9981356eaa196586175dd6a"
+reference = "https://github.com/ICB-DCM/pyPESTO/pull/1810"
+source_access = "auto"
+built_at = "2026-11-14T07:00:48.382081+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:5c11598a6e0bf4f11f14cc224f6227d658274dbdae3bd9917412d3836bbbcdf8"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-11T12:02:29Z"
+diff_format = "unified"
+context_files = [
+    "doc/example/amici.ipynb",
+    "doc/example/getting_started.ipynb",
+    "doc/example/petab_import.ipynb",
+    "doc/example/store.ipynb",
+    "pyproject.toml",
+    "tox.ini",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 18
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

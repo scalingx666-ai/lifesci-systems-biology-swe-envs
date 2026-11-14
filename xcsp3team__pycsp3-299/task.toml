@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/xcsp3team__pycsp3-299"
+description = "Element on a list of identical integers indexed by a variable (#281)"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "pycsp3",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "xcsp3team/pycsp3"
+ref = "821b50dc68d30453007cf42cf4dadafb341d12c0"
+reference = "https://github.com/xcsp3team/pycsp3/pull/299"
+source_access = "auto"
+built_at = "2026-11-14T07:02:32.821452+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:2470dcd3bf579d379675899148981d6d7f3c29f07e8d368d6e9151f3995a2cf7"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-28T08:50:52Z"
+diff_format = "unified"
+context_files = [
+    "pycsp3/classes/main/constraints.py",
+    "pycsp3/tests/test_constants.py",
+    "pycsp3/tests/test_constraints_global_element.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 158
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

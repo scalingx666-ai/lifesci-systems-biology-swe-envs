@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/bioFAM__MOFA2-140"
+description = "Fix .set colorby"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "MOFA2",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "bioFAM/MOFA2"
+ref = "e605bf285bfa3ed98b3ebfb3b2e9d2b7a68c2717"
+reference = "https://github.com/bioFAM/MOFA2/pull/140"
+source_access = "auto"
+built_at = "2026-11-14T07:00:39.009340+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:94b1c05496d2a7c1a982a05289e2583b2b873b763a531f331c851246505f34d1"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2024-06-12T07:30:43Z"
+diff_format = "unified"
+context_files = [
+    "R/plot_weights.R",
+    "R/utils.R",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 6
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

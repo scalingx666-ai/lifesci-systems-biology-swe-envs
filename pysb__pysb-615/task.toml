@@ -1,0 +1,66 @@
+version = "1.0"
+
+[task]
+name = "default/pysb__pysb-615"
+description = "chore(deps): replace mock with unittest.mock, drop unused deps"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "pysb",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "pysb/pysb"
+ref = "5b4ba3eac459779b9b1b9e727c9d5363c70c4639"
+reference = "https://github.com/pysb/pysb/pull/615"
+source_access = "auto"
+built_at = "2026-11-14T07:01:03.256555+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:8e25eacf93f93ba743939834c4189c5dfdb23d90f065ec0c058569d3f7806e3d"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-03-30T11:54:07Z"
+diff_format = "unified"
+context_files = [
+    ".github/pysb-conda-env.yml",
+    "doc/conf.py",
+    "doc/requirements.txt",
+    "pysb/tests/test_importers.py",
+    "setup.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 12
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

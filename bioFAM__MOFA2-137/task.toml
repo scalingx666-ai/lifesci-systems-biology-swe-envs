@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/bioFAM__MOFA2-137"
+description = "MOFAcell documentation"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "MOFA2",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "bioFAM/MOFA2"
+ref = "41d5c4c755ff2c47579661e4f6d035ea4613b724"
+reference = "https://github.com/bioFAM/MOFA2/pull/137"
+source_access = "auto"
+built_at = "2026-11-14T07:00:47.193813+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:54e50db43f9cdb386e7aba63309f3c1b116bde8b791bfcf497ca67855256b5b3"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2023-11-27T08:24:59Z"
+diff_format = "unified"
+context_files = [
+    "MOFAcell.md",
+    "images/MOFAcellFig.png",
+    "index.md",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 28
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,72 @@
+version = "1.0"
+
+[task]
+name = "default/iVis-at-Bilkent__pathway-mapper-286"
+description = "Transfer bug, updating svgs, underlay, and upgrading Cytoscape.js extensions"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "pathway-mapper",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "iVis-at-Bilkent/pathway-mapper"
+ref = "8fc99132cd35313af409483db2e77e07c24d9c63"
+reference = "https://github.com/iVis-at-Bilkent/pathway-mapper/pull/286"
+source_access = "auto"
+built_at = "2026-11-14T07:03:31.797719+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:dc9d36ba803404f2b398296a0a99104609f8f2fd1906f7c1a94a4a4f2062e4b3"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2023-07-05T14:00:02Z"
+diff_format = "unified"
+context_files = [
+    "packages/pathway-mapper/dist/base.css.map",
+    "packages/pathway-mapper/dist/index.es5.js",
+    "packages/pathway-mapper/dist/index.es5.js.map",
+    "packages/pathway-mapper/package.json",
+    "packages/pathway-mapper/src/images/nodes/compartment.svg",
+    "packages/pathway-mapper/src/images/nodes/complex.svg",
+    "packages/pathway-mapper/src/images/nodes/family.svg",
+    "packages/pathway-mapper/src/images/nodes/gene.svg",
+    "packages/pathway-mapper/src/managers/ContextMenuManager.tsx",
+    "packages/pathway-mapper/src/utils/GraphStyleSheet.tsx",
+    "yarn.lock",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2003
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/Rockman6__CellSim-40"
+description = "Palbociclib note: cells slip through, as the view shows"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "CellSim",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Rockman6/CellSim"
+ref = "fb8cf659f1f9775f896be2fe236bdc40129ad8ed"
+reference = "https://github.com/Rockman6/CellSim/pull/40"
+source_access = "auto"
+built_at = "2026-11-14T06:05:57.073831+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:ec52faff9d073be7844c2cb90df74a543726acdfa2801fedab03246391ca77bf"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-08T14:19:52Z"
+diff_format = "unified"
+context_files = [
+    "web/lab/cell.js",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 18
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

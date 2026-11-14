@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/Noble-Lab__HiCFoundation-8"
+description = "Fix symmetric masking and diagonal unit"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "HiCFoundation",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Noble-Lab/HiCFoundation"
+ref = "f77452a634195889d657f782786967d0f09843f3"
+reference = "https://github.com/Noble-Lab/HiCFoundation/pull/8"
+source_access = "auto"
+built_at = "2026-11-14T07:04:08.248687+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:04b60fe9884d27ce636217b947f5d273086d90d39011e1ef238da4acaa4c097c"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-06-07T04:29:38Z"
+diff_format = "unified"
+context_files = [
+    "data_processing/pretrain_dataset.py",
+    "model/models_hicfoundation.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 5
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

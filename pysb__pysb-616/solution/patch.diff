@@ -1,0 +1,11 @@
+diff --git a/codecov.yml b/codecov.yml
+new file mode 100644
+index 00000000..d08101fc
+--- /dev/null
++++ b/codecov.yml
+@@ -0,0 +1,5 @@
++coverage:
++  status:
++    project:
++      default:
++        informational: true

@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/bioFAM__mofaflex-247"
+description = "Bump astral-sh/setup-uv from 10.3.2 to 10.3.3 in the actions-deps group"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "mofaflex",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "bioFAM/mofaflex"
+ref = "3dc7b75494c309ad8c68394007d9e2d8b73b74ee"
+reference = "https://github.com/bioFAM/mofaflex/pull/247"
+source_access = "auto"
+built_at = "2026-11-14T07:04:13.992030+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:971ce5839a1dc4f6ad912ca42edeac03c9adf25a73dd9d978d8abc6f2e23352d"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-10T19:25:37Z"
+diff_format = "unified"
+context_files = [
+    ".github/workflows/build.yaml",
+    ".github/workflows/release.yaml",
+    ".github/workflows/test.yaml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 8
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

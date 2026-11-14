@@ -1,0 +1,113 @@
+diff --git a/conversion/pom.xml b/conversion/pom.xml
+index d77800f1a..dfe3f5fb8 100644
+--- a/conversion/pom.xml
++++ b/conversion/pom.xml
+@@ -62,23 +62,15 @@
+ 		</dependency>	
+ 		<dependency>
+ 			<groupId>org.apache.jena</groupId>
+-			<artifactId>jena-base</artifactId>
++			<artifactId>apache-jena-libs</artifactId>
+ 			<version>3.0.0</version>
++			<type>pom</type>
++			<scope>import</scope>
+ 		</dependency>
+ 		<dependency>
+-			<groupId>org.apache.jena</groupId>
+-			<artifactId>jena-arq</artifactId>
+-			<version>3.0.0</version>
+-			<exclusions>
+-        		<exclusion>
+-            		<groupId>xml-apis</groupId>
+-            		<artifactId>xml-apis</artifactId>
+-       			</exclusion>
+-       			<exclusion>
+-           			 <groupId>xerces</groupId>
+-            		 <artifactId>xercesImpl</artifactId>
+-        		</exclusion>
+-   			</exclusions>			
++  			<groupId>xerces</groupId>
++ 			 <artifactId>xercesImpl</artifactId>
++  			<version>2.12.2</version>
+ 		</dependency>
+ 	</dependencies>
+ 	 <repositories>
+diff --git a/gui/pom.xml b/gui/pom.xml
+index 322a69ba8..ffe4c5c81 100644
+--- a/gui/pom.xml
++++ b/gui/pom.xml
+@@ -178,6 +178,12 @@
+     		<artifactId>jdom2</artifactId>
+     		<version>2.0.6</version>
+ 		</dependency>
++		
++		<dependency>
++  			<groupId>xerces</groupId>
++ 			 <artifactId>xercesImpl</artifactId>
++  			<version>2.12.2</version>
++		</dependency>
+ 
+ 	</dependencies>
+ </project>
+diff --git a/gui/src/main/java/edu/utah/ece/async/ibiosim/gui/Gui.java b/gui/src/main/java/edu/utah/ece/async/ibiosim/gui/Gui.java
+index e132a454f..cdcb0e288 100644
+--- a/gui/src/main/java/edu/utah/ece/async/ibiosim/gui/Gui.java
++++ b/gui/src/main/java/edu/utah/ece/async/ibiosim/gui/Gui.java
+@@ -886,28 +886,35 @@ public void windowDeactivated(WindowEvent arg0) {
+ 		if (Desktop.isDesktopSupported()) {
+             Desktop desktop = Desktop.getDesktop();
+ 
+-            // Set the "About" menu handler
+-            desktop.setAboutHandler(e -> {
+-            	about();
+-            });
+-
+-            // Set the "Preferences" menu handler
+-            desktop.setPreferencesHandler(e -> {
+-    			PreferencesDialog.showPreferences(Gui.frame);
+-    			getFileTree().setExpandibleIcons(!IBioSimPreferences.INSTANCE.isPlusMinusIconsEnabled());
+-    			if (getSBOLDocument() != null) {
+-    				getSBOLDocument().setDefaultURIprefix(SBOLEditorPreferences.INSTANCE.getUserInfo().getURI().toString());
+-    			}
+-            });
+-
+-            // Set the "Quit" menu handler
+-            desktop.setQuitHandler((e, response) -> {
+-            	exit();
+-    			// If we have returned from the above call the user has decided not to quit
+-            	response.cancelQuit();
+-            	// Perform cleanup before exiting
+-                //response.performQuit(); // or response.cancelQuit();
+-            });
++            if (desktop.isSupported(Desktop.Action.APP_ABOUT)) {
++            	// Set the "About" menu handler
++            	desktop.setAboutHandler(e -> {
++            		about();
++            	});
++            }
++
++            if (desktop.isSupported(Desktop.Action.APP_PREFERENCES)) {
++            	// Set the "Preferences" menu handler
++            	desktop.setPreferencesHandler(e -> {
++            		PreferencesDialog.showPreferences(Gui.frame);
++            		getFileTree().setExpandibleIcons(!IBioSimPreferences.INSTANCE.isPlusMinusIconsEnabled());
++            		if (getSBOLDocument() != null) {
++            			getSBOLDocument().setDefaultURIprefix(SBOLEditorPreferences.INSTANCE.getUserInfo().getURI().toString());
++            		}
++            	});
++            }
++            
++            if (desktop.isSupported(Desktop.Action.APP_QUIT_HANDLER)) {
++            	// Set the "Quit" menu handler
++            	desktop.setQuitHandler((e, response) -> {
++            		exit();
++            		// If we have returned from the above call the user has decided not to quit
++            		response.cancelQuit();
++            		// Perform cleanup before exiting
++            		//response.performQuit(); // or response.cancelQuit();
++            	});
++            }
++            
+ 		} else {
+ 			edit.addSeparator();
+ 			edit.add(pref);

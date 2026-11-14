@@ -1,0 +1,25 @@
+diff --git a/Gemfile.lock b/Gemfile.lock
+index a140baad22..a39b64c8a7 100644
+--- a/Gemfile.lock
++++ b/Gemfile.lock
+@@ -648,7 +648,7 @@ GEM
+     pyu-ruby-sasl (0.0.3.3)
+     raabro (1.4.0)
+     racc (1.8.1)
+-    rack (3.2.7)
++    rack (3.2.8)
+     rack-attack (6.7.0)
+       rack (>= 1.0, < 4)
+     rack-cors (2.0.2)
+diff --git a/config/version.yml b/config/version.yml
+index 01d16f47dd..ac4ed84261 100644
+--- a/config/version.yml
++++ b/config/version.yml
+@@ -8,5 +8,5 @@
+ # patch:        sprint-555
+ 
+ major:        1
+-minor:        19
+-patch:        0-dev
++minor:        20
++patch:        0-main

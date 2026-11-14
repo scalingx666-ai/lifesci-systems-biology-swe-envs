@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/cnapy-org__CNApy-568"
+description = "multi-threaded FVA using highspy"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "CNApy",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "cnapy-org/CNApy"
+ref = "1c3000eae78d54c3eaa254d73e1cc5d324138fc4"
+reference = "https://github.com/cnapy-org/CNApy/pull/568"
+source_access = "auto"
+built_at = "2026-11-14T07:02:46.274149+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:fc2e6bc3a556a19ff97cae6bdf00d48263f7606ae1ad6552e4646f026cb92c6b"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-07-21T12:39:23Z"
+diff_format = "unified"
+context_files = [
+    "cnapy/core.py",
+    "cnapy/gui_elements/main_window.py",
+    "pyproject.toml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 265
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

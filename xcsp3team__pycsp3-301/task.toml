@@ -1,0 +1,66 @@
+version = "1.0"
+
+[task]
+name = "default/xcsp3team__pycsp3-301"
+description = "Element with an index outside the list (#282)"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "pycsp3",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "xcsp3team/pycsp3"
+ref = "a98bcfd7025ac77019cc52b0bbe101128329a6e4"
+reference = "https://github.com/xcsp3team/pycsp3/pull/301"
+source_access = "auto"
+built_at = "2026-11-14T07:02:20.290067+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:788ba777a9b2263288c6692e578ab8a93de9e39ecb9bb9d6362d39c8c03c4ee0"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-10T09:06:09Z"
+diff_format = "unified"
+context_files = [
+    "pycsp3/classes/main/constraints.py",
+    "pycsp3/functions.py",
+    "pycsp3/tests/test_constraints_global_element.py",
+    "pycsp3/tools/curser.py",
+    "pycsp3/tools/utilities.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 603
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,65 @@
+version = "1.0"
+
+[task]
+name = "default/biosustain__shu-60"
+description = "[FIX(ggshu)] Bump dependencies of python package"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "shu",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "biosustain/shu"
+ref = "b389109a07b1a90eace2ffe536dab842b172965b"
+reference = "https://github.com/biosustain/shu/pull/60"
+source_access = "auto"
+built_at = "2026-11-14T07:03:46.515068+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:6c6e1e3f9bb3ecdd06d68ff0cc41ada7f6cf68c5446c21f25e8afb2156c49794"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-11-07T09:48:57Z"
+diff_format = "unified"
+context_files = [
+    ".github/workflows/ci.yml",
+    "ggshu/README.md",
+    "ggshu/README.rst",
+    "ggshu/pyproject.toml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 71
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,71 @@
+version = "1.0"
+
+[task]
+name = "default/saezlab__corneto-65"
+description = "Release v1.0.0-rc.8"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "corneto",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "saezlab/corneto"
+ref = "eb61561a540d248968751cf1d7bed82cd679efb7"
+reference = "https://github.com/saezlab/corneto/pull/65"
+source_access = "auto"
+built_at = "2026-11-14T07:01:52.873900+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:5f3cee3d71fb8373c762a5b3e12e9cbe59c9733611072251658df4bd9bec6a25"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-02T13:24:57Z"
+diff_format = "unified"
+context_files = [
+    "corneto/backend/_base.py",
+    "corneto/methods/_base.py",
+    "corneto/methods/fba.py",
+    "corneto/methods/imat.py",
+    "docs/api/corneto.backend.rst",
+    "docs/releases/index.md",
+    "docs/releases/v1.0.0-rc.8.md",
+    "tests/methods/test_imat.py",
+    "tests/test_backend_threshold_indicator.py",
+    "tests/test_backend_total_variation.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 483
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

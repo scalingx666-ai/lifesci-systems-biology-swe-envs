@@ -1,0 +1,70 @@
+diff --git a/.github/actions/setup-tox/action.yml b/.github/actions/setup-tox/action.yml
+index de2ee539e..539f7db41 100644
+--- a/.github/actions/setup-tox/action.yml
++++ b/.github/actions/setup-tox/action.yml
+@@ -19,6 +19,13 @@ runs:
+       shell: bash
+       run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+ 
++    # runner image (e.g. ubuntu24, ubuntu26): wheels built from source link
++    # against system libraries, so caches must not cross image versions
++    - name: Get runner image
++      id: image
++      shell: bash
++      run: echo "image=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
++
+     # download caches never decide which versions get installed,
+     # so falling back to older entries is safe
+     - name: Cache downloads
+@@ -27,10 +34,10 @@ runs:
+         path: |
+           ~/.cache/pip
+           ~/.cache/uv
+-        key: "${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-dl-${{ github.job }}-${{ steps.week.outputs.week }}"
++        key: "${{ runner.os }}-${{ steps.image.outputs.image }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-dl-${{ github.job }}-${{ steps.week.outputs.week }}"
+         restore-keys: |
+-          ${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-dl-${{ github.job }}-
+-          ${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-dl-
++          ${{ runner.os }}-${{ steps.image.outputs.image }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-dl-${{ github.job }}-
++          ${{ runner.os }}-${{ steps.image.outputs.image }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-dl-
+ 
+     # no restore-keys: restoring an older env would bring back stale
+     # dependencies
+@@ -38,4 +45,4 @@ runs:
+       uses: actions/cache@v6
+       with:
+         path: .tox/
+-        key: "${{ runner.os }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-tox-${{ github.job }}-${{ hashFiles('tox.ini', 'pyproject.toml') }}-${{ steps.week.outputs.week }}"
++        key: "${{ runner.os }}-${{ steps.image.outputs.image }}-${{ runner.arch }}-py${{ steps.setup-python.outputs.python-version }}-tox-${{ github.job }}-${{ hashFiles('tox.ini', 'pyproject.toml') }}-${{ steps.week.outputs.week }}"
+diff --git a/.github/workflows/install_deps.sh b/.github/workflows/install_deps.sh
+index 771c811ef..66ee607ef 100755
+--- a/.github/workflows/install_deps.sh
++++ b/.github/workflows/install_deps.sh
+@@ -2,6 +2,9 @@
+ 
+ # Install CI dependencies, arguments specify what is required
+ 
++# Fail on the first error, e.g. an apt package that does not exist
++set -e
++
+ # Base packages
+ pip install --upgrade pip
+ pip install wheel setuptools
+@@ -32,7 +35,7 @@ for par in "$@"; do
+         brew install swig hdf5 libomp
+       else
+         sudo apt-get install \
+-          clang libatlas-base-dev libhdf5-serial-dev libomp-dev swig
++          clang libopenblas-dev libhdf5-serial-dev libomp-dev swig
+       fi
+     ;;
+ 
+@@ -40,7 +43,7 @@ for par in "$@"; do
+       # for ipopt
+       sudo apt-get install \
+ 	build-essential \
+-        coinor-libipopt1v5 coinor-libipopt-dev \
++        coinor-libipopt-dev \
+         gfortran lcov pkg-config python3-dev zlib1g-dev
+       if [ ! -f /usr/lib/x86_64-linux-gnu/liblapack.so ]; then
+         sudo ln -s /usr/lib/x86_64-linux-gnu/liblapack.so.3 /usr/lib/x86_64-linux-gnu/liblapack.so

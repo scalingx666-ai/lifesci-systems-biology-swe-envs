@@ -1,0 +1,1213 @@
+diff --git a/corneto/_plotting.py b/corneto/_plotting.py
+index 8bf7a7751..7bd151607 100644
+--- a/corneto/_plotting.py
++++ b/corneto/_plotting.py
+@@ -7,6 +7,7 @@
+ 
+ from corneto.backend._base import EXPR_NAME_FLOW
+ from corneto.graph import Attr, BaseGraph, EdgeType
++from corneto.plotting.signaling import BIOLOGY_THEME, biology_signaling_style
+ 
+ Theme = Dict[str, Any]
+ ProcessorOutput = Tuple[Dict[int, Dict[str, str]], Dict[Union[int, str], Dict[str, str]]]
+@@ -21,6 +22,7 @@
+ ]
+ 
+ _THEMES: Dict[str, Theme] = {
++    "signaling_biology": BIOLOGY_THEME,
+     "default": {
+         "positive_color": "firebrick4",
+         "negative_color": "dodgerblue4",
+@@ -38,14 +40,14 @@
+ }
+ 
+ 
+-def _resolve_theme(theme: Optional[Union[str, Theme]]) -> Theme:
++def _resolve_theme(theme: Optional[Union[str, Theme]], default: str = "default") -> Theme:
+     if theme is None:
+-        return dict(_THEMES["default"])
++        return dict(_THEMES[default])
+     if isinstance(theme, str):
+         if theme not in _THEMES:
+             raise ValueError(f"Unknown theme '{theme}'. Available themes: {list(_THEMES.keys())}")
+         return dict(_THEMES[theme])
+-    out = dict(_THEMES["default"])
++    out = dict(_THEMES[default])
+     out.update(theme)
+     return out
+ 
+@@ -203,12 +205,27 @@ def _processor_vertex_attribute_style(graph: BaseGraph, data: Dict[str, Any], th
+ 
+ 
+ _PROCESSORS: Dict[str, ProcessorFn] = {
++    "signaling_biology": biology_signaling_style,
+     "sign_magnitude": _processor_sign_magnitude,
+     "metabolism_flux": _processor_metabolism_flux,
+     "vertex_attribute_style": _processor_vertex_attribute_style,
+ }
+ 
+-_PRESETS: Dict[str, Dict[str, str]] = {
++_PRESETS: Dict[str, Dict[str, Any]] = {
++    "signaling_biology": {
++        "theme": "signaling_biology",
++        "processor": "signaling_biology",
++        "graph_attr": {"rankdir": "TB", "bgcolor": "white", "nodesep": "0.3", "ranksep": "0.5"},
++        "node_attr": {
++            "fixedsize": "false",
++            "fontname": "Helvetica",
++            "fontsize": "10",
++            "fontcolor": "#222222",
++            "margin": "0.10,0.06",
++            "height": "0.35",
++        },
++        "edge_attr": {"fontname": "Helvetica", "fontsize": "9"},
++    },
+     # Preferred names
+     "default": {"theme": "default", "processor": "sign_magnitude"},
+     "signaling": {"theme": "default", "processor": "sign_magnitude"},
+@@ -502,6 +519,7 @@ def mpl_color(value: Any, default: str) -> str:
+         "rectangle": "s",
+         "square": "s",
+         "diamond": "D",
++        "hexagon": "h",
+         "triangle": "^",
+         "point": ".",
+         "circle": "o",
+@@ -601,6 +619,7 @@ def plot_graph(graph: BaseGraph, renderer: str = "auto", **kwargs) -> Any:
+     sample = kwargs.pop("sample", None)
+     role_key = kwargs.pop("role_key", "role")
+ 
++    preset_cfg = {}
+     if preset is not None:
+         if preset not in _PRESETS:
+             raise ValueError(f"Unknown preset '{preset}'. Available presets: {list(_PRESETS.keys())}")
+@@ -609,9 +628,12 @@ def plot_graph(graph: BaseGraph, renderer: str = "auto", **kwargs) -> Any:
+             theme_arg = preset_cfg["theme"]
+         if processor_arg is None:
+             processor_arg = preset_cfg["processor"]
++        for attr_name in ("graph_attr", "node_attr", "edge_attr"):
++            if attr_name in preset_cfg:
++                kwargs[attr_name] = {**preset_cfg[attr_name], **(kwargs.get(attr_name) or {})}
+ 
+     preset_solution_map = None
+-    if preset in ("simple", "default", "signaling"):
++    if preset in ("simple", "default", "signaling", "signaling_biology"):
+         preset_solution_map = {"vertex": "vertex_value", "edge": "edge_value"}
+     elif preset in ("metabolism_flux", "metabolism"):
+         preset_solution_map = {"flux": EXPR_NAME_FLOW}
+@@ -630,7 +652,7 @@ def plot_graph(graph: BaseGraph, renderer: str = "auto", **kwargs) -> Any:
+ 
+     processors = _resolve_processors(processor_arg)
+     if processors:
+-        theme = _resolve_theme(theme_arg)
++        theme = _resolve_theme(theme_arg, default=preset_cfg.get("theme", "default"))
+         for processor in processors:
+             proc_edge_attr, proc_vertex_attr = processor(graph, data, theme)
+             kwargs["custom_edge_attr"] = _merge_attrs(proc_edge_attr, kwargs.get("custom_edge_attr"))
+diff --git a/corneto/methods/shortest_path.py b/corneto/methods/shortest_path.py
+index a5e979165..f536d5cec 100644
+--- a/corneto/methods/shortest_path.py
++++ b/corneto/methods/shortest_path.py
+@@ -1,13 +1,13 @@
+ """Shortest-path formulations for one or multiple conditions."""
+ 
++from collections import deque
+ from typing import Any, List, Optional
+ 
+ import numpy as np
+ 
+-from corneto._settings import LOGGER
+-from corneto.backend import DEFAULT_BACKEND, Backend
+-from corneto.backend._base import DEFAULT_UB, Indicator
+-from corneto.graph import BaseGraph
++from corneto.backend import DEFAULT_BACKEND, Backend, VarType
++from corneto.graph import Attr, BaseGraph, EdgeType
++from corneto.methods._network_utils import augment_with_boundaries
+ 
+ __all__ = [
+     "create_multisample_shortest_path",
+@@ -16,6 +16,41 @@
+ ]
+ 
+ 
++def _validate_terminals(graph, pairs):
++    if any(len(source) > 1 or len(target) > 1 for source, target in graph.E):
++        raise ValueError("Shortest paths do not support hyperedges.")
++    for source, target in pairs:
++        if source not in graph.V or target not in graph.V:
++            raise ValueError("Source and target must be vertices in the graph.")
++
++
++def _path_weights(graph, edge_weights, shape):
++    if edge_weights is None:
++        weights = np.array([attr.get("weight", 0) for attr in graph.get_attr_edges()], dtype=float)
++        weights = np.broadcast_to(weights, shape).copy()
++    else:
++        weights = np.asarray(edge_weights, dtype=float)
++    if weights.shape != shape:
++        raise ValueError(f"Expected edge_weights with shape {shape}, got {weights.shape}.")
++    if not np.all(np.isfinite(weights)) or np.any(weights < 0):
++        raise ValueError("Shortest paths require finite, nonnegative edge weights.")
++    return weights
++
++
++def _flow_bounds(graph):
++    return np.array(
++        [-1.0 if attr.has_attr(Attr.EDGE_TYPE, EdgeType.UNDIRECTED) else 0.0 for attr in graph.get_attr_edges()]
++    )
++
++
++def _flow_magnitude(problem, backend):
++    flow = problem.expr.flow
++    magnitude = backend.Variable("_path_magnitude", flow.shape, lb=0, ub=1)
++    problem += magnitude >= flow
++    problem += magnitude >= -flow
++    return magnitude
++
++
+ def create_multisample_shortest_path(
+     G: BaseGraph,
+     source_target_nodes: List[tuple],
+@@ -24,50 +59,46 @@ def create_multisample_shortest_path(
+     backend: Backend = DEFAULT_BACKEND,
+     lam: float = 0.0,
+ ):
+-    """Build one shortest-path flow per source-target condition."""
+-    # Transform the graph into a flow problem
+-    Gc = G.copy()
+-    inflow_edges = dict()
+-    outflow_edges = dict()
+-    for s, t in source_target_nodes:
+-        if s not in inflow_edges:
+-            inflow_edges[s] = Gc.add_edge((), s)
+-        if t not in outflow_edges:
+-            outflow_edges[t] = Gc.add_edge(t, ())
+-    if edge_weights is None:
+-        edge_weights = np.array([Gc.get_attr_edge(i).get("weight", 0) for i in range(Gc.ne)])
+-        # The number of samples equals the number of source-target pairs.
+-        # We need to duplicate the edge weights for each sample.
+-        edge_weights = np.tile(edge_weights, (len(source_target_nodes), 1))
+-    else:
+-        # Verify that the number of edge weights is correct
+-        edge_weights = np.array(edge_weights)
+-        if edge_weights.shape[0] != len(source_target_nodes):
+-            raise ValueError("The number of edge weights must equal the number of source-target pairs.")
+-        # Add the weights for the extra edges, to be 0
+-        n_extra_edges = Gc.ne - G.ne
+-        edge_weights = np.concatenate([edge_weights, np.zeros((len(source_target_nodes), n_extra_edges))], axis=1)
+-    P = backend.Flow(Gc, lb=0, ub=DEFAULT_UB, n_flows=len(source_target_nodes))
+-    # Now we add the objective and constraints for each sample
+-    for i, (s, t) in enumerate(source_target_nodes):
+-        weights = edge_weights[i, :]
+-        P.add_objective(
+-            P.expr.flow[:, i].multiply(weights).sum(),
+-            name=f"path_cost_{i}",
++    """Build unit shortest-path flows with finite nonnegative edge costs.
++
++    With ``lam=0`` this is an LP. A positive ``lam`` adds binary support
++    variables to penalize the union of edges used across conditions.
++    Undirected edges support either traversal direction in each condition.
++    """
++    pairs = list(source_target_nodes)
++    if not pairs:
++        raise ValueError("At least one source-target pair is required.")
++    _validate_terminals(G, pairs)
++    weights = _path_weights(G, edge_weights, (len(pairs), G.ne))
++    layout = augment_with_boundaries(
++        G,
++        inflow_vertices=[s for s, _ in pairs],
++        outflow_vertices=[t for _, t in pairs],
++    )
++    Gc = layout.graph
++    weights = np.pad(weights, ((0, 0), (0, Gc.ne - G.ne)))
++    lb = _flow_bounds(Gc)
++    if lam > 0:
++        P = backend.SelectedFlow(
++            Gc,
++            lb=lb,
++            ub=1,
++            n_flows=len(pairs),
++            epsilon=1,
++            selected_by_flow_name="_path_selected",
++            selected_any_name="active_edge",
+         )
+-        # Now we inject/extract 1 unit flow from s to t
+-        P += P.expr.flow[inflow_edges[s], i] == 1
+-        P += P.expr.flow[outflow_edges[t], i] == 1
+-        # For the rest of inflow/outflow edges, we set the flow to 0
+-        for node in inflow_edges:
+-            if node != s:
+-                P += P.expr.flow[inflow_edges[node], i] == 0
+-        for node in outflow_edges:
+-            if node != t:
+-                P += P.expr.flow[outflow_edges[node], i] == 0
+-    # Add reg
++        magnitude = P.expr._path_selected
++    else:
++        P = backend.Flow(Gc, lb=lb, ub=1, n_flows=len(pairs), force_matrix=True)
++        magnitude = _flow_magnitude(P, backend)
++    for i, (s, t) in enumerate(pairs):
++        P.add_objective(magnitude[:, i].multiply(weights[i]).sum(), name=f"path_cost_{i}")
++        for node, edge in layout.inflow_edges.items():
++            P += P.expr.flow[edge, i] == int(node == s)
++        for node, edge in layout.outflow_edges.items():
++            P += P.expr.flow[edge, i] == int(node == t)
+     if lam > 0:
+-        P += backend.linear_or(P.expr.flow, axis=1, ignore_type=True, varname="active_edge")
+         P.add_objective(P.expr.active_edge.sum(), weight=lam, name="shared_edge_regularization")
+     return P, Gc
+ 
+@@ -77,45 +108,79 @@ def shortest_path(
+     s: Any,
+     t: Any,
+     edge_weights=None,
+-    integral_path: bool = True,
++    integral_path: bool = False,
+     create_flow_graph: bool = True,
+     backend: Backend = DEFAULT_BACKEND,
+ ):
+-    """Build a shortest-path optimization problem between two vertices."""
+-    # Transform to a flow problem
++    """Build a shortest-path LP with finite nonnegative edge costs.
++
++    Undirected edges permit signed unit flow and cost its magnitude.
++    Set ``integral_path=True`` to explicitly require binary edge support.
++    With ``create_flow_graph=False``, weights must cover the existing graph,
++    which must already contain source and sink boundary edges.
++    """
++    _validate_terminals(G, [(s, t)])
++    weights = _path_weights(G, edge_weights, (G.ne,))
+     if create_flow_graph:
+-        Gc = G.copy()
+-        e_start = Gc.add_edge((), s)
+-        e_end = Gc.add_edge(t, ())
++        layout = augment_with_boundaries(G, inflow_vertices=[s], outflow_vertices=[t])
++        Gc = layout.graph
++        e_start = layout.inflow_edges[s]
++        e_end = layout.outflow_edges[t]
++        weights = np.pad(weights, (0, Gc.ne - G.ne))
+     else:
+         Gc = G
+-        e_start, (tail, head) = next(iter(Gc.in_edges(s)))
+-        if tail != ():
+-            raise ValueError(f"Node {s} is not a source node. It has an incoming edge from {tail}.")
+-
+-        e_end, (tail, head) = next(iter(Gc.out_edges(t)))
+-        if head != ():
+-            raise ValueError(f"Node {t} is not a sink node. It has an outgoing edge to {head}.")
+-    if edge_weights is None:
+-        edge_weights = np.array([Gc.get_attr_edge(i).get("weight", 0) for i in range(Gc.ne)])
+-    else:
+-        edge_weights = np.array(edge_weights)
+-        # Add the weights for the extra edges, to be 0
+-        edge_weights = np.concatenate([edge_weights, [0, 0]])
++        e_start = next((i for i, (source, target) in enumerate(Gc.E) if not source and target == {s}), None)
++        e_end = next((i for i, (source, target) in enumerate(Gc.E) if source == {t} and not target), None)
++        if e_start is None or e_end is None:
++            raise ValueError("The graph must contain source and sink boundary edges.")
++    lb = _flow_bounds(Gc)
++    P = backend.Flow(Gc, lb=lb, ub=1)
+     if integral_path:
+-        P = backend.Flow(Gc, lb=0, ub=DEFAULT_UB)
+-        P += Indicator()
+-        selected = P.symbols["_flow_i"]
++        selected = backend.Variable("_flow_i", P.expr.flow.shape, vartype=VarType.BINARY)
++        P += backend.ExactSupport(
++            P.symbols["_flow"],
++            selected=selected,
++            epsilon=1,
++            nonnegative=bool(np.all(lb >= 0)),
++            name="_path_support",
++        )
++        magnitude = selected
+     else:
+-        P = backend.Flow(Gc, lb=0, ub=None)
+-        selected = P.symbols["_flow"]
+-    F = P.symbols["_flow"]
+-    P.add_objectives(selected @ edge_weights)
+-    P.add_constraints(F[e_start] == 1)
+-    P.add_constraints(F[e_end] == 1)
++        magnitude = _flow_magnitude(P, backend)
++    P.add_objectives(magnitude.multiply(weights).sum())
++    P += P.expr.flow[e_start] == 1
++    P += P.expr.flow[e_end] == 1
+     return P, Gc
+ 
+ 
++def _extract_path(graph, flow, source, target, tolerance):
++    """Extract one simple path from an optimal flow, discarding ties and cycles."""
++    adjacency = {vertex: [] for vertex in graph.V}
++    for edge, ((tail, head), value) in enumerate(zip(graph.E, flow)):
++        if not tail or not head or abs(value) <= tolerance:
++            continue
++        start, end = next(iter(tail)), next(iter(head))
++        if value < 0:
++            start, end = end, start
++        adjacency[start].append((end, edge))
++    parents = {source: None}
++    pending = deque([source])
++    while pending and target not in parents:
++        vertex = pending.popleft()
++        for neighbor, edge in adjacency[vertex]:
++            if neighbor not in parents:
++                parents[neighbor] = (vertex, edge)
++                pending.append(neighbor)
++    if target not in parents:
++        raise ValueError("No solution path found in the solver flow.")
++    path = []
++    vertex = target
++    while vertex != source:
++        vertex, edge = parents[vertex]
++        path.append(edge)
++    return path
++
++
+ def solve_shortest_path(
+     G: BaseGraph,
+     s: Any,
+@@ -126,33 +191,27 @@ def solve_shortest_path(
+     integer_tolerance: float = 1e-6,
+     solver_kwargs: Optional[dict] = None,
+ ):
+-    """Solve a shortest-path problem and return its selected edge indices."""
+-    P, Gc = shortest_path(
+-        G,
+-        s,
+-        t,
+-        edge_weights=edge_weights,
+-        integral_path=False,
+-        backend=backend,
+-    )
+-    if solver_kwargs is None:
+-        solver_kwargs = {}
+-    P.solve(solver=solver, **solver_kwargs)
+-    sol = np.array(P.expr.flow.value)
+-    if sol is None:
++    """Solve an LP and return one path's edge indices, problem, and flow graph.
++
++    A fractional mixture of tied optimal paths is resolved by extracting a
++    simple path from its directional support, without an integer solve. Edge
++    indices include the artificial source and sink edges for compatibility.
++    The returned problem retains the original, possibly fractional LP flow.
++    ``integer_tolerance`` is the threshold for ignoring numerical zero flows.
++    """
++    P, Gc = shortest_path(G, s, t, edge_weights=edge_weights, integral_path=False, backend=backend)
++    # Report disconnected terminals consistently, including with backends that
++    # raise their own exception instead of returning an infeasible problem.
++    if t not in G.bfs([s]):
++        raise ValueError("No solution found: target is unreachable from source.")
++    if not np.isfinite(integer_tolerance) or integer_tolerance <= 0:
++        raise ValueError("integer_tolerance must be finite and positive.")
++    P.solve(solver=solver, **(solver_kwargs or {}))
++    if P.expr.flow.value is None:
+         raise ValueError("No solution found.")
+-    # Check if values are almost 0 or 1
+-    almost_zero = np.isclose(sol, 0, atol=integer_tolerance)
+-    almost_one = np.isclose(sol, 1, atol=integer_tolerance)
+-    almost_integral = almost_zero | almost_one
+-    solution = np.where(sol >= (1 - integer_tolerance))[0]
+-    if not np.all(almost_integral):
+-        LOGGER.warning(
+-            "Number of non-integral edges: %d. Solving again with integral constraints.",
+-            np.sum(~almost_integral),
+-        )
+-        P, Gc = shortest_path(Gc, s, t, create_flow_graph=False, integral_path=True, backend=backend)
+-        P.solve(solver=solver, warm_start=True, **solver_kwargs)
+-        flow_indicator = P.symbols["_flow_i"]
+-        solution = np.where(flow_indicator.value > 0.5)[0]
++    flow = np.asarray(P.expr.flow.value, dtype=float).reshape(-1)
++    if not np.all(np.isfinite(flow)):
++        raise ValueError("No solution found: solver returned nonfinite flow.")
++    path = _extract_path(G, flow[: G.ne], s, t, integer_tolerance)
++    solution = np.array(sorted([*path, G.ne, G.ne + 1]), dtype=int)
+     return solution, P, Gc
+diff --git a/corneto/plotting/__init__.py b/corneto/plotting/__init__.py
+new file mode 100644
+index 000000000..ee1dee1f7
+--- /dev/null
++++ b/corneto/plotting/__init__.py
+@@ -0,0 +1,5 @@
++"""Reusable themes and processors for graph plotting."""
++
++from corneto.plotting.signaling import BIOLOGY_THEME, biology_signaling_style
++
++__all__ = ["BIOLOGY_THEME", "biology_signaling_style"]
+diff --git a/corneto/plotting/signaling.py b/corneto/plotting/signaling.py
+new file mode 100644
+index 000000000..2c5ca0a45
+--- /dev/null
++++ b/corneto/plotting/signaling.py
+@@ -0,0 +1,119 @@
++"""Reusable biological styling for signed CORNETO signaling graphs.
++
++The processor uses CORNETO's public ``processor(graph, data, theme)`` API.
++It does not fetch annotations or depend on CARNIVAL/OmniPath/Decoupler.
++Node classes must be supplied by the caller; regulator annotations win overlaps.
++Arrowheads encode the prior interaction, dashes encode reduced source activity,
++and fills encode inferred node activity. Widths do not encode confidence.
++"""
++
++import numpy as np
++
++from corneto.graph import Attr, EdgeType
++
++__all__ = ["BIOLOGY_THEME", "biology_signaling_style"]
++
++
++BIOLOGY_THEME = {
++    "positive_color": "#F6D8B5",
++    "negative_color": "#CCE2F2",
++    "zero_color": "#F2F2F2",
++    "node_border": "#555555",
++    "edge_color": "#555555",
++    "reduced_source_edge_color": "#888888",
++    "edge_width": 1.1,
++    "arrow_size": 0.65,
++    "node_border_width": 0.8,
++    "measured_border_width": 1.8,
++    "receptor_shape": "box",
++    "regulator_shape": "hexagon",
++    "protein_shape": "ellipse",
++}
++
++
++def _activity_vector(values, size, name):
++    """Accept one sample in graph order, including column vectors."""
++    values = np.asarray(values, dtype=float)
++    if values.shape == (size, 1):
++        values = values[:, 0]
++    if values.shape != (size,) or not np.all(np.isfinite(values)):
++        raise ValueError(f"{name} must contain {size} finite values for one sample in graph order.")
++    return values
++
++
++def biology_signaling_style(graph, plot_data, theme):
++    """Style signed signaling activity using explicit biological annotations.
++
++    ``plot_data`` requires finite ``vertex_values`` in ``graph.V`` order and
++    optionally accepts ``receptors``, ``regulators``, and ``measured`` vertex
++    collections. Regulators take precedence over receptors. The nonnegative
++    ``activity_threshold`` defaults to 0.5; values at either threshold are neutral.
++    Only directed edges with one source and one target receive edge styling.
++    Edge selection and boundary filtering remain the caller's responsibility.
++    """
++    theme = {**BIOLOGY_THEME, **theme}
++    threshold = float(plot_data.get("activity_threshold", 0.5))
++    if not np.isfinite(threshold) or threshold < 0:
++        raise ValueError("activity_threshold must be finite and nonnegative.")
++    if "vertex_values" not in plot_data:
++        raise ValueError("signaling_biology requires data['vertex_values'] in graph order.")
++    values = _activity_vector(plot_data["vertex_values"], len(graph.V), "vertex_values")
++    activity = dict(zip(graph.V, values, strict=True))
++    receptors = set(plot_data.get("receptors", ()))
++    regulators = set(plot_data.get("regulators", ()))
++    measured = set(plot_data.get("measured", ()))
++    edge_attrs, vertex_attrs = {}, {}
++
++    for vertex in graph.V:
++        # Regulator annotations take precedence over the broad LigRecExtra
++        # target list, which can also contain intracellular proteins (e.g. SMAD3).
++        if vertex in regulators:
++            shape, style = theme["regulator_shape"], "filled"
++            node_class = "TF / transcriptional regulator"
++        elif vertex in receptors:
++            shape, style = theme["receptor_shape"], "rounded,filled"
++            node_class = "Receptor"
++        else:
++            shape, style = theme["protein_shape"], "filled"
++            node_class = "Other signaling protein"
++        value = activity[vertex]
++        fill = (
++            theme["positive_color"]
++            if value > threshold
++            else theme["negative_color"]
++            if value < -threshold
++            else theme["zero_color"]
++        )
++        vertex_attrs[str(vertex)] = {
++            "shape": shape,
++            "style": style,
++            "fillcolor": fill,
++            "color": theme["node_border"],
++            "penwidth": str(theme["measured_border_width"] if vertex in measured else theme["node_border_width"]),
++            "tooltip": f"{vertex}: {node_class}; inferred activity {value:+g}",
++        }
++
++    for index, (sources, targets) in graph.edges():
++        # Boundary edges and hyperedges have no unambiguous single-source activity.
++        if len(sources) != 1 or len(targets) != 1:
++            continue
++        if graph.get_attr_edge(index).get_attr(Attr.EDGE_TYPE, "") == EdgeType.UNDIRECTED.value:
++            continue
++        source = next(iter(sources))
++        reduced = activity[source] < -threshold
++        inhibitory = graph.get_attr_edge(index).get("interaction", 0) < 0
++        mechanism = "inhibition" if inhibitory else "activation"
++        effect = f"Reduced {mechanism}" if reduced else f"Increased {mechanism}"
++        if reduced and inhibitory:
++            effect = "Release of inhibition"
++        if abs(activity[source]) <= threshold:
++            effect = f"No inferred change in upstream activity ({mechanism})"
++        edge_attrs[index] = {
++            "arrowhead": "tee" if inhibitory else "normal",
++            "style": "dashed" if reduced else "solid",
++            "color": theme["reduced_source_edge_color"] if reduced else theme["edge_color"],
++            "penwidth": str(theme["edge_width"]),
++            "arrowsize": str(theme["arrow_size"]),
++            "tooltip": effect,
++        }
++    return edge_attrs, vertex_attrs
+diff --git a/docs/_extension/gallery_directive.py b/docs/_extension/gallery_directive.py
+index 20eede1c7..cf20e7bce 100644
+--- a/docs/_extension/gallery_directive.py
++++ b/docs/_extension/gallery_directive.py
+@@ -10,13 +10,14 @@
+ """
+ 
+ from pathlib import Path
+-from typing import Any, Dict, List
++from typing import Any, ClassVar, Dict, List
+ 
+ from docutils import nodes
+ from docutils.parsers.rst import directives
+ from sphinx.application import Sphinx
+ from sphinx.util import logging
+ from sphinx.util.docutils import SphinxDirective
++from sphinx_design import cards
+ from yaml import safe_load
+ 
+ logger = logging.getLogger(__name__)
+@@ -48,7 +49,7 @@ class GalleryDirective(SphinxDirective):
+     required_arguments = 0
+     optional_arguments = 1
+     final_argument_whitespace = True
+-    option_spec = {
++    option_spec: ClassVar[Dict[str, Any]] = {
+         # A class to be added to the resulting container
+         "grid-columns": directives.unchanged,
+         "class-container": directives.unchanged,
+@@ -56,6 +57,7 @@ class GalleryDirective(SphinxDirective):
+     }
+ 
+     def run(self) -> List[nodes.Node]:
++        """Build a gallery grid from YAML content."""
+         if self.arguments:
+             # If an argument is given, assume it's a path to a YAML file
+             # Parse it and load it into the directive content
+@@ -98,7 +100,10 @@ def run(self) -> List[nodes.Node]:
+             # Grid card content
+             content_str = ""
+             if "header" in item:
+-                content_str += f"{item['header']}\n\n^^^\n\n"
++                if hasattr(cards, "CardHeaderDirective"):
++                    content_str += f"```{{card-header}}\n{item['header']}\n```\n\n"
++                else:
++                    content_str += f"{item['header']}\n\n^^^\n\n"
+ 
+             if "image" in item:
+                 content_str += f"![Gallery image]({item['image']})\n\n"
+@@ -107,7 +112,10 @@ def run(self) -> List[nodes.Node]:
+                 content_str += f"{item['content']}\n\n"
+ 
+             if "footer" in item:
+-                content_str += f"+++\n\n{item['footer']}\n\n"
++                if hasattr(cards, "CardFooterDirective"):
++                    content_str += f"```{{card-footer}}\n{item['footer']}\n```\n\n"
++                else:
++                    content_str += f"+++\n\n{item['footer']}\n\n"
+ 
+             title = item.get("title", "")
+             content_str += "\n"
+diff --git a/docs/guide/intro/plotting.ipynb b/docs/guide/intro/plotting.ipynb
+index 268e1d8e2..e4821f1c1 100644
+--- a/docs/guide/intro/plotting.ipynb
++++ b/docs/guide/intro/plotting.ipynb
+@@ -347,6 +347,58 @@
+     "G.plot(renderer=\"wasm\")"
+    ]
+   },
++  {
++   "cell_type": "markdown",
++   "metadata": {},
++   "source": [
++    "### Biological signaling preset\n",
++    "\n",
++    "`signaling_biology` separates prior interaction signs from inferred source activity:\n",
++    "arrowheads show activation or inhibition, dashed grey edges indicate reduced\n",
++    "source activity, and node fills show positive (peach), negative (blue), or neutral\n",
++    "activity. Edge widths are constant and do not represent confidence.\n",
++    "\n",
++    "Supply biological annotations explicitly: receptors use rounded boxes, regulators\n",
++    "use hexagons (taking precedence over receptors), and measured nodes have thicker\n",
++    "borders. Values follow `graph.V` order. The interpretation threshold is configured\n",
++    "in `data`, defaults to `0.5`, and treats values at either threshold as neutral.\n",
++    "\n",
++    "```python\n",
++    "g.plot(\n",
++    "    preset=\"signaling_biology\",\n",
++    "    data={\n",
++    "        \"vertex_values\": vertex_values,\n",
++    "        \"receptors\": receptor_names,\n",
++    "        \"regulators\": tf_names,\n",
++    "        \"measured\": measured_names,\n",
++    "        \"activity_threshold\": 0.5,\n",
++    "    },\n",
++    "    edge_indexes=selected_edges,\n",
++    "    orphan_edges=False,\n",
++    "    theme={\"reduced_source_edge_color\": \"#999999\"},\n",
++    ")\n",
++    "```\n",
++    "\n",
++    "The preset supplies typography and layout defaults; override them using\n",
++    "`graph_attr`, `node_attr`, or `edge_attr`. A partial `theme` dictionary overrides\n",
++    "the selected preset's defaults, while a named theme replaces them. Explicit\n",
++    "`custom_vertex_attr` and `custom_edge_attr` take precedence over processor output.\n",
++    "Edge selection and boundary filtering remain explicit. Biological edge styling\n",
++    "applies to directed edges with exactly one source and one target.\n",
++    "\n",
++    "The components can also be reused without the preset:\n",
++    "\n",
++    "```python\n",
++    "from corneto.plotting.signaling import BIOLOGY_THEME, biology_signaling_style\n",
++    "\n",
++    "g.plot(\n",
++    "    processor=biology_signaling_style,\n",
++    "    theme=BIOLOGY_THEME,\n",
++    "    data={\"vertex_values\": vertex_values, \"regulators\": tf_names},\n",
++    ")\n",
++    "```\n"
++   ]
++  },
+   {
+    "cell_type": "markdown",
+    "id": "cb1e1581032b452c9409d6c6813c49d1",
+diff --git a/docs/releases/index.md b/docs/releases/index.md
+index 9028eaab7..f6cac2a74 100644
+--- a/docs/releases/index.md
++++ b/docs/releases/index.md
+@@ -7,6 +7,7 @@ This section contains detailed release notes for CORNETO versions, documenting n
+ ```{toctree}
+ :maxdepth: 1
+ 
++v1.0.0-rc.9
+ v1.0.0-rc.8
+ v1.0.0-rc.7
+ v1.0.0-rc.6
+diff --git a/docs/releases/v1.0.0-rc.9.md b/docs/releases/v1.0.0-rc.9.md
+new file mode 100644
+index 000000000..56d8397f3
+--- /dev/null
++++ b/docs/releases/v1.0.0-rc.9.md
+@@ -0,0 +1,39 @@
++# Release v1.0.0-rc.9 {bdg-warning}`Pre-release`
++
++CORNETO 1.0.0 RC9 fixes shortest paths on undirected and mixed graphs and adds
++a reusable biological signaling plotting preset.
++
++## Highlights
++
++- Shortest-path costs now account for both traversal directions of undirected
++  edges while preserving directed-edge restrictions and original edge indices.
++- Single-path solving stays an LP, including when the solver returns a
++  fractional mixture of equally optimal paths. Path extraction removes
++  zero-cost circulations without an automatic integer solve.
++- Multi-condition shortest paths support reverse traversal, a single condition,
++  and shared-edge L0 regularization that counts opposite traversals once.
++- Fixed PICOS single-path objective construction and missing-solution handling.
++- Updated generated gallery cards for Sphinx Design 0.8 while retaining
++  compatibility with earlier documentation environments.
++- Added the `signaling_biology` plotting preset, with explicit receptor,
++  regulator, and measured-node annotations, activity colors, and interaction
++  arrowheads. Its theme and processor can also be reused independently.
++- Expanded regression coverage across CVXPY and PICOS for weighted directed,
++  undirected, and mixed graphs, endpoint orderings, ties, and shared support.
++
++## Compatibility
++
++`shortest_path` now defaults to `integral_path=False`. Explicit
++`integral_path=True` remains available. Shortest-path methods require finite,
++nonnegative edge costs and reject hyperedges. When reusing a flow graph with
++`create_flow_graph=False`, explicit weights must cover that existing graph,
++including its boundary edges.
++
++`solve_shortest_path` keeps its return tuple and includes artificial source and
++sink edges in the returned indices. The selected edges describe one simple
++optimal path; the returned problem retains the original LP flow, which may
++be fractional when paths tie. `integer_tolerance` controls which numerical
++zero flows are ignored during extraction. Unreachable targets raise
++`ValueError`.
++
++The new plotting preset is opt-in. Existing plotting defaults are preserved.
+diff --git a/tests/graph/test_signaling_biology.py b/tests/graph/test_signaling_biology.py
+new file mode 100644
+index 000000000..ceb93c904
+--- /dev/null
++++ b/tests/graph/test_signaling_biology.py
+@@ -0,0 +1,129 @@
++import numpy as np
++import pytest
++
++from corneto._plotting import _resolve_theme, to_dot_source
++from corneto.graph import EdgeType, Graph
++from corneto.plotting.signaling import BIOLOGY_THEME, biology_signaling_style
++
++
++class _DotPlot(str):
++    def _repr_mimebundle_(self):
++        return {}
++
++
++@pytest.fixture
++def graph():
++    g = Graph()
++    g.add_edge("receptor", "regulator", interaction=-1)
++    g.add_edge("regulator", "protein", interaction=1)
++    return g
++
++
++def test_biology_encodes_activity_mechanism_and_annotations(graph):
++    edges, vertices = biology_signaling_style(
++        graph,
++        {
++            "vertex_values": [-1, 1, 0],
++            "receptors": ["receptor", "regulator"],
++            "regulators": ["regulator"],
++            "measured": ["protein"],
++        },
++        BIOLOGY_THEME,
++    )
++    assert vertices["receptor"]["shape"] == "box"
++    assert vertices["regulator"]["shape"] == "hexagon"
++    assert vertices["protein"]["shape"] == "ellipse"
++    assert [vertices[v]["fillcolor"] for v in graph.V] == ["#CCE2F2", "#F6D8B5", "#F2F2F2"]
++    assert vertices["protein"]["penwidth"] == "1.8"
++    assert edges[0]["arrowhead"] == "tee"
++    assert edges[0]["style"] == "dashed"
++    assert edges[0]["tooltip"] == "Release of inhibition"
++    assert edges[1]["arrowhead"] == "normal"
++    assert edges[1]["style"] == "solid"
++    assert edges[0]["penwidth"] == edges[1]["penwidth"]
++
++
++@pytest.mark.parametrize("threshold", [-1, np.nan, np.inf])
++def test_processor_validates_threshold_without_helper(graph, threshold):
++    with pytest.raises(ValueError, match="finite and nonnegative"):
++        biology_signaling_style(graph, {"vertex_values": [0, 0, 0], "activity_threshold": threshold}, {})
++
++
++@pytest.mark.parametrize("values", [[1, 0], [np.nan, 0, 0], [[1, 0], [0, 0], [0, 1]]])
++def test_processor_validates_activity(graph, values):
++    with pytest.raises(ValueError, match="finite values"):
++        biology_signaling_style(graph, {"vertex_values": values}, {})
++
++
++def test_threshold_boundaries_and_column_vector(graph):
++    edges, vertices = biology_signaling_style(
++        graph, {"vertex_values": np.array([[-0.2], [0.2], [0]]), "activity_threshold": 0.2}, {}
++    )
++    assert all(v["fillcolor"] == BIOLOGY_THEME["zero_color"] for v in vertices.values())
++    assert edges[0]["style"] == "solid"
++    assert "No inferred change" in edges[0]["tooltip"]
++
++
++def test_missing_activity_is_actionable(graph):
++    with pytest.raises(ValueError, match="vertex_values"):
++        biology_signaling_style(graph, {}, {})
++
++
++def test_boundary_hyperedges_and_undirected_edges_keep_base_rendering():
++    g = Graph()
++    g.add_edge((), "A")
++    g.add_edge({"A", "B"}, "C")
++    g.add_edge("A", "B", type=EdgeType.UNDIRECTED)
++    edges, _ = biology_signaling_style(g, {"vertex_values": [-1] * len(g.V)}, {})
++    assert edges == {}
++
++
++def test_preset_matches_direct_use_and_preserves_overrides(monkeypatch, graph):
++    monkeypatch.setattr(Graph, "to_graphviz", lambda self, **kwargs: _DotPlot(to_dot_source(self, **kwargs)))
++    data = {"vertex_values": [-1, 1, 0], "regulators": ["regulator"]}
++    source = graph.plot(
++        renderer="graphviz",
++        preset="signaling_biology",
++        data=data,
++        theme={"reduced_source_edge_color": "gray"},
++        graph_attr={"rankdir": "LR"},
++        custom_vertex_attr={"protein": {"fillcolor": "yellow"}},
++        custom_edge_attr={0: {"penwidth": "3"}},
++    )
++    assert 'color="gray"' in source
++    assert 'fillcolor="#F6D8B5"' in source
++    assert 'fillcolor="yellow"' in source
++    assert 'penwidth="3"' in source
++    assert 'rankdir="LR"' in source
++    assert 'bgcolor="white"' in source
++    assert 'fixedsize="false"' in source
++    assert BIOLOGY_THEME["reduced_source_edge_color"] == "#888888"
++    edges, vertices = biology_signaling_style(graph, data, BIOLOGY_THEME)
++    direct = graph.plot(renderer="graphviz", processor=biology_signaling_style, theme=BIOLOGY_THEME, data=data)
++    assert direct == to_dot_source(graph, custom_edge_attr=edges, custom_vertex_attr=vertices)
++
++
++def test_named_theme_replaces_preset_theme():
++    assert _resolve_theme("default", default="signaling_biology")["positive_color"] == "firebrick4"
++    assert _resolve_theme({"edge_width": 2}, default="signaling_biology")["positive_color"] == "#F6D8B5"
++
++
++def test_preset_extracts_solution_sample_and_keeps_selection_explicit(monkeypatch, graph):
++    monkeypatch.setattr(Graph, "to_graphviz", lambda self, **kwargs: _DotPlot(to_dot_source(self, **kwargs)))
++    source = graph.plot(
++        renderer="graphviz",
++        preset="signaling_biology",
++        solution={"vertex_value": np.array([[-1, 1], [1, -1], [0, 0]])},
++        sample=1,
++        edge_indexes=[1],
++    )
++    assert '"receptor" -> "regulator"' not in source
++    assert 'style="dashed"' in source
++
++
++def test_integer_vertex_identifiers():
++    g = Graph()
++    g.add_edge(10, 20)
++    edges, vertices = biology_signaling_style(g, {"vertex_values": [-1, 1]}, {})
++    source = to_dot_source(g, custom_edge_attr=edges, custom_vertex_attr=vertices)
++    assert '"10" [shape="ellipse", style="filled", fillcolor="#CCE2F2"' in source
+diff --git a/tests/methods/test_shortest_path.py b/tests/methods/test_shortest_path.py
+index 95e6f1c4e..d824204b1 100644
+--- a/tests/methods/test_shortest_path.py
++++ b/tests/methods/test_shortest_path.py
+@@ -1,9 +1,331 @@
+ """Tests for single- and multi-condition shortest paths."""
+ 
+ import numpy as np
++import pytest
+ 
+-from corneto.graph import Graph
+-from corneto.methods.shortest_path import create_multisample_shortest_path
++from corneto._constants import VarType
++from corneto.graph import EdgeType, Graph
++from corneto.methods.shortest_path import (
++    create_multisample_shortest_path,
++    shortest_path,
++    solve_shortest_path,
++)
++
++EDGE_CASES = [
++    pytest.param(EdgeType.DIRECTED, False, id="directed"),
++    pytest.param(EdgeType.UNDIRECTED, False, id="undirected-forward"),
++    pytest.param(EdgeType.UNDIRECTED, True, id="undirected-reverse"),
++    pytest.param(None, False, id="mixed-forward"),
++    pytest.param(None, True, id="mixed-reverse"),
++]
++
++
++def _weighted_graph(edge_type, reverse):
++    """Offer a cheap three-edge path and more expensive shorter alternatives."""
++    graph = Graph()
++    edges = [("A", "B", 8), ("A", "C", 1), ("C", "B", 1), ("B", "D", 1), ("A", "D", 9)]
++    for index, (source, target, weight) in enumerate(edges):
++        kind = edge_type if edge_type is not None else EdgeType.DIRECTED
++        if edge_type is None and index == 2:
++            kind = EdgeType.UNDIRECTED
++        if index == 2 and reverse:
++            source, target = target, source
++            kind = EdgeType.UNDIRECTED
++        graph.add_edge(source, target, type=kind, weight=weight)
++    # A backwards directed shortcut must not become traversable in a mixed graph.
++    if edge_type is None:
++        graph.add_edge("D", "A", type=EdgeType.DIRECTED, weight=0.1)
++    return graph
++
++
++def _assert_cost(problem, graph, expected, weights=None):
++    """Check traversal costs using original edges, including reverse traversal."""
++    assert problem.expr.flow.value is not None
++    flow = np.asarray(problem.expr.flow.value).reshape(graph.num_edges, -1)
++    if weights is None:
++        weights = np.array([graph.get_attr_edge(i).get("weight", 0) for i in range(graph.num_edges)])
++    weights = np.asarray(weights)
++    if weights.ndim == 1:
++        weights = weights[:, None]
++    assert np.allclose((np.abs(flow) * weights).sum(axis=0), expected)
++
++
++@pytest.mark.parametrize(("edge_type", "reverse"), EDGE_CASES)
++@pytest.mark.parametrize("integral_path", [False, True], ids=["lp", "integral"])
++def test_shortest_path_weighted_edge_types(backend, edge_type, reverse, integral_path):
++    graph = _weighted_graph(edge_type, reverse)
++    original = graph.to_dict()
++    problem, flow_graph = shortest_path(graph, "A", "D", integral_path=integral_path, backend=backend)
++    problem.solve()
++
++    _assert_cost(problem, flow_graph, [3])
++    assert np.isclose(problem.objectives[0].value, 3)
++    assert graph.to_dict() == original
++    assert flow_graph.E[: graph.num_edges] == graph.E
++
++
++@pytest.mark.parametrize(("edge_type", "reverse"), EDGE_CASES)
++def test_solve_shortest_path_selects_original_edges(backend, edge_type, reverse):
++    graph = _weighted_graph(edge_type, reverse)
++    edges, problem, flow_graph = solve_shortest_path(graph, "A", "D", backend=backend)
++
++    _assert_cost(problem, flow_graph, [3])
++    assert set(edges[edges < graph.num_edges]) == {1, 2, 3}
++
++
++@pytest.mark.parametrize(("edge_type", "reverse"), EDGE_CASES)
++def test_multisample_shortest_path_weighted_edge_types(backend, edge_type, reverse):
++    graph = _weighted_graph(edge_type, reverse)
++    original = graph.to_dict()
++    problem, flow_graph = create_multisample_shortest_path(graph, [("A", "D"), ("C", "D")], backend=backend)
++    problem.solve()
++
++    _assert_cost(problem, flow_graph, [3, 2])
++    assert np.allclose([objective.value for objective in problem.objectives], [3, 2])
++    assert graph.to_dict() == original
++    assert flow_graph.E[: graph.num_edges] == graph.E
++
++
++@pytest.mark.parametrize("method", ["builder", "solve", "multisample"])
++def test_shortest_path_custom_weights_override_attributes(backend, method):
++    graph = _weighted_graph(EdgeType.DIRECTED, False)
++    # Attribute weights favor A-C-B-D; explicit weights favor A-B-D.
++    weights = np.array([1, 8, 8, 1, 9])
++    if method == "multisample":
++        problem, flow_graph = create_multisample_shortest_path(
++            graph,
++            [("A", "D"), ("C", "D")],
++            edge_weights=np.stack([weights, weights]),
++            backend=backend,
++        )
++        problem.solve()
++        expected = [2, 9]
++    elif method == "builder":
++        problem, flow_graph = shortest_path(graph, "A", "D", edge_weights=weights, integral_path=False, backend=backend)
++        problem.solve()
++        expected = [2]
++    else:
++        edges, problem, flow_graph = solve_shortest_path(graph, "A", "D", edge_weights=weights, backend=backend)
++        assert set(edges[edges < graph.num_edges]) == {0, 3}
++        expected = [2]
++    padded_weights = np.pad(weights, (0, flow_graph.num_edges - graph.num_edges))
++    _assert_cost(problem, flow_graph, expected, padded_weights)
++
++
++def test_multisample_shortest_path_uses_condition_specific_weights(backend):
++    graph = _weighted_graph(EdgeType.DIRECTED, False)
++    weights = np.array([[8, 1, 1, 1, 9], [1, 8, 8, 1, 9]])
++    problem, flow_graph = create_multisample_shortest_path(
++        graph, [("A", "D"), ("A", "D")], edge_weights=weights, backend=backend
++    )
++    problem.solve()
++
++    padded_weights = np.pad(weights, ((0, 0), (0, flow_graph.num_edges - graph.num_edges)))
++    _assert_cost(problem, flow_graph, [3, 2], padded_weights.T)
++    flow = np.asarray(problem.expr.flow.value)
++    assert set(np.flatnonzero(np.abs(flow[: graph.num_edges, 0]) > 0.5)) == {1, 2, 3}
++    assert set(np.flatnonzero(np.abs(flow[: graph.num_edges, 1]) > 0.5)) == {0, 3}
++
++
++def test_multisample_shortest_path_accepts_one_condition(backend):
++    graph = _weighted_graph(EdgeType.DIRECTED, False)
++    problem, flow_graph = create_multisample_shortest_path(graph, [("A", "D")], backend=backend)
++    problem.solve()
++
++    _assert_cost(problem, flow_graph, [3])
++
++
++def _reported_graph(reverse_middle):
++    graph = Graph()
++    middle = ("D", "F") if reverse_middle else ("F", "D")
++    for source, target in [("A", "B"), ("A", "C"), ("B", "D"), ("C", "E"), ("E", "F"), middle, ("F", "G")]:
++        graph.add_edge(source, target, type=EdgeType.UNDIRECTED, weight=1)
++    return graph
++
++
++@pytest.mark.parametrize(
++    ("source", "target", "expected", "reverse_middle"),
++    [
++        pytest.param("A", "B", 1, False, id="FD-A-B"),
++        pytest.param("A", "F", 3, False, id="FD-A-F"),
++        pytest.param("A", "D", 2, False, id="FD-A-D"),
++        pytest.param("B", "F", 2, False, id="FD-B-F"),
++        pytest.param("B", "D", 1, False, id="FD-B-D"),
++        pytest.param("F", "D", 1, False, id="FD-F-D"),
++        pytest.param("A", "B", 1, True, id="DF-A-B"),
++        pytest.param("A", "F", 3, True, id="DF-A-F"),
++        pytest.param("A", "D", 2, True, id="DF-A-D"),
++        pytest.param("B", "F", 2, True, id="DF-B-F"),
++        pytest.param("B", "D", 1, True, id="DF-B-D"),
++        pytest.param("F", "D", 1, True, id="DF-F-D"),
++    ],
++)
++def test_solve_shortest_path_reported_endpoint_ordering(backend, source, target, expected, reverse_middle):
++    graph = _reported_graph(reverse_middle)
++    edges, problem, flow_graph = solve_shortest_path(graph, source, target, backend=backend)
++
++    _assert_cost(problem, flow_graph, [expected])
++    # Both equally short A-F paths are valid; do not depend on the solver's tie breaking.
++    assert len(edges[edges < graph.num_edges]) == expected
++
++
++@pytest.mark.parametrize("reverse_middle", [False, True], ids=["FD", "DF"])
++def test_multisample_shortest_path_opposite_traversals(backend, reverse_middle):
++    graph = _reported_graph(reverse_middle)
++    problem, flow_graph = create_multisample_shortest_path(graph, [("D", "F"), ("F", "D")], backend=backend)
++    problem.solve()
++
++    _assert_cost(problem, flow_graph, [1, 1])
++    flow = np.asarray(problem.expr.flow.value)
++    assert np.allclose(flow[5, :], [1, -1] if reverse_middle else [-1, 1])
++
++
++def test_solve_shortest_path_unreachable_target(backend):
++    graph = Graph()
++    graph.add_edge("A", "B", weight=1)
++    graph.add_vertex("C")
++
++    with pytest.raises(ValueError, match="No solution"):
++        solve_shortest_path(graph, "A", "C", backend=backend)
++
++
++def test_solve_shortest_path_missing_solver_values(backend, monkeypatch):
++    graph = Graph()
++    graph.add_edge("A", "B", weight=1)
++    # An interrupted solve can leave values unset even on a connected graph.
++    monkeypatch.setattr(backend, "_solve", lambda *args, **kwargs: None)
++    with pytest.raises(ValueError, match="No solution"):
++        solve_shortest_path(graph, "A", "B", backend=backend)
++
++
++def test_solve_shortest_path_identical_terminals(backend):
++    graph = Graph()
++    graph.add_vertex("A")
++    edges, problem, flow_graph = solve_shortest_path(graph, "A", "A", backend=backend)
++
++    assert set(edges) == {0, 1}  # Only the two boundary edges; the biological path is empty.
++    _assert_cost(problem, flow_graph, [0])
++
++
++@pytest.mark.parametrize("method", ["single", "single-default", "multisample"])
++def test_unregularized_shortest_path_has_no_integer_variables(backend, method):
++    graph = _weighted_graph(EdgeType.DIRECTED, False)
++    if method == "single":
++        problem, _ = shortest_path(graph, "A", "D", integral_path=False, backend=backend)
++    elif method == "single-default":
++        problem, _ = shortest_path(graph, "A", "D", backend=backend)
++    else:
++        problem, _ = create_multisample_shortest_path(graph, [("A", "D"), ("C", "D")], backend=backend)
++
++    assert all(symbol._vartype == VarType.CONTINUOUS for symbol in problem.symbols.values())
++
++
++@pytest.mark.parametrize("zero_cost", [False, True], ids=["weighted-tie", "zero-cost-tie"])
++def test_solve_shortest_path_extracts_fractional_tie_without_integer_solve(backend, monkeypatch, zero_cost):
++    graph = Graph()
++    for source, target in [("C", "A"), ("C", "D"), ("A", "B"), ("B", "D")]:
++        graph.add_edge(source, target, type=EdgeType.UNDIRECTED, weight=10)
++    weights = np.zeros(4) if zero_cost else np.array([2, 1, 1, 2])
++    solve = backend._solve
++    calls = []
++
++    def solve_fractional_optimum(problem, **kwargs):
++        calls.append(problem)
++        assert all(symbol._vartype == VarType.CONTINUOUS for symbol in problem.symbols.values())
++        # Force a feasible mixture of the two optimal paths rather than relying
++        # on a particular solver algorithm or its tie breaking.
++        problem += problem.expr.flow[:4] == np.array([-0.5, 0.5, 0.5, 0.5])
++        return solve(problem, **kwargs)
++
++    monkeypatch.setattr(backend, "_solve", solve_fractional_optimum)
++    edges, problem, flow_graph = solve_shortest_path(graph, "A", "D", edge_weights=weights, backend=backend)
++
++    assert len(calls) == 1
++    assert set(edges[edges < graph.num_edges]) in ({0, 1}, {2, 3})
++    assert np.allclose(np.asarray(problem.expr.flow.value).reshape(-1)[:4], [-0.5, 0.5, 0.5, 0.5])
++    assert np.isclose(weights[edges[edges < graph.num_edges]].sum(), 0 if zero_cost else 3)
++    assert flow_graph.num_edges == graph.num_edges + 2
++
++
++def test_solve_shortest_path_discards_zero_cost_circulation(backend, monkeypatch):
++    graph = Graph()
++    for source, target, weight in [("A", "B", 1), ("B", "D", 1), ("B", "C", 0), ("C", "B", 0)]:
++        graph.add_edge(source, target, weight=weight)
++    solve = backend._solve
++
++    def solve_with_circulation(problem, **kwargs):
++        problem += problem.expr.flow[:4] == np.array([1, 1, 0.5, 0.5])
++        return solve(problem, **kwargs)
++
++    monkeypatch.setattr(backend, "_solve", solve_with_circulation)
++    edges, problem, flow_graph = solve_shortest_path(graph, "A", "D", backend=backend)
++
++    assert set(edges[edges < graph.num_edges]) == {0, 1}
++    _assert_cost(problem, flow_graph, [2])
++
++
++def test_shortest_path_reuses_augmented_graph_with_custom_weights(backend):
++    graph = _weighted_graph(None, True)
++    _, flow_graph = shortest_path(graph, "A", "D", backend=backend)
++    # Select the path that requires reverse traversal, overriding attributes.
++    weights = np.array([8, 1, 1, 1, 9, 0.1, 0, 0])
++    problem, reused = shortest_path(
++        flow_graph, "A", "D", edge_weights=weights, create_flow_graph=False, backend=backend
++    )
++    problem.solve()
++
++    assert reused is flow_graph
++    _assert_cost(problem, flow_graph, [3], weights)
++
++
++@pytest.mark.parametrize("method", ["single", "multisample"])
++@pytest.mark.parametrize("weight", [-1, np.inf, np.nan])
++def test_shortest_path_rejects_invalid_costs(backend, method, weight):
++    graph = Graph()
++    graph.add_edge("A", "B", weight=weight)
++    with pytest.raises(ValueError, match="finite, nonnegative"):
++        if method == "single":
++            shortest_path(graph, "A", "B", backend=backend)
++        else:
++            create_multisample_shortest_path(graph, [("A", "B")], backend=backend)
++
++
++def test_multisample_shortest_path_l0_penalty_shares_edges(backend):
++    graph = Graph()
++    for source, target, weight in [
++        ("A", "X", 1),
++        ("X", "D", 1),
++        ("A", "Y", 1.5),
++        ("Y", "D", 1),
++        ("B", "Y", 1),
++        ("B", "X", 1.5),
++    ]:
++        graph.add_edge(source, target, weight=weight)
++
++    independent, _ = create_multisample_shortest_path(graph, [("A", "D"), ("B", "D")], backend=backend)
++    independent.solve()
++    independent_flow = np.asarray(independent.expr.flow.value)[: graph.num_edges, :]
++    assert np.count_nonzero(np.any(np.abs(independent_flow) > 0.5, axis=1)) == 4
++
++    shared, _ = create_multisample_shortest_path(graph, [("A", "D"), ("B", "D")], lam=2, backend=backend)
++    shared.solve()
++    shared_flow = np.asarray(shared.expr.flow.value)[: graph.num_edges, :]
++    used = np.any(np.abs(shared_flow) > 0.5, axis=1)
++    assert np.count_nonzero(used) == 3
++    assert np.allclose(np.asarray(shared.expr.active_edge.value).reshape(-1)[: graph.num_edges], used)
++    weights = np.array([graph.get_attr_edge(i)["weight"] for i in range(graph.num_edges)])
++    assert np.isclose((np.abs(shared_flow) * weights[:, None]).sum(), 4.5)
++
++
++def test_multisample_shortest_path_l0_counts_opposite_traversals_once(backend):
++    graph = Graph()
++    graph.add_edge("A", "B", type=EdgeType.UNDIRECTED, weight=1)
++    problem, flow_graph = create_multisample_shortest_path(graph, [("A", "B"), ("B", "A")], lam=1, backend=backend)
++    problem.solve()
++
++    _assert_cost(problem, flow_graph, [1, 1])
++    assert np.allclose(np.asarray(problem.expr.flow.value)[0, :], [1, -1])
++    assert np.isclose(np.asarray(problem.expr.active_edge.value).reshape(-1)[0], 1)
+ 
+ 
+ def test_multisample_shortest_path_isolates_condition_terminals(backend):

@@ -1,0 +1,33 @@
+diff --git a/R/plot_weights.R b/R/plot_weights.R
+index 9bd50ab4..ba9c04d9 100644
+--- a/R/plot_weights.R
++++ b/R/plot_weights.R
+@@ -601,7 +601,7 @@ plot_top_weights <- function(object, view = 1, factors = 1,
+     stopifnot(all(unique(color_by$feature) %in% features_names(object)[[view]]))
+     
+     # Option 3: by a feature_metadata column
+-  } else if ((length(color_by)==1) && is.character(color_by) & (color_by %in% colnames(features_metadata(object)))) {
++  } else if ((length(color_by)==1) && is.character(color_by) && (color_by %in% colnames(features_metadata(object)))) {
+     tmp <- features_metadata(object)
+     color_by <- tmp[tmp$view==view,color_by]
+     
+diff --git a/R/utils.R b/R/utils.R
+index 450890d3..12888316 100644
+--- a/R/utils.R
++++ b/R/utils.R
+@@ -390,7 +390,7 @@ setReplaceMethod("colnames", signature(x = "matrix_placeholder"),
+     color_by <- samples_metadata(object)$group
+     
+     # Option 2: by a metadata column in object@samples$metadata
+-  } else if ((length(color_by) == 1) && (is.character(color_by)|is.factor(color_by)) & (color_by[1] %in% colnames(samples_metadata(object)))) {
++  } else if ((length(color_by) == 1) && (is.character(color_by)|is.factor(color_by)) && (color_by[1] %in% colnames(samples_metadata(object)))) {
+     color_by <- samples_metadata(object)[,color_by]
+     # if (is.character(color_by)) color_by <- as.factor( color_by )
+     
+@@ -725,4 +725,4 @@ add_mofa_factors_to_seurat <- function(mofa_object, seurat_object, views = "all"
+   }
+   
+   return(seurat_object)
+-}
+\ No newline at end of file
++}

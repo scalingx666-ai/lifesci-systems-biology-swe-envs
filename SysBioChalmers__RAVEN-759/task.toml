@@ -1,0 +1,70 @@
+version = "1.0"
+
+[task]
+name = "default/SysBioChalmers__RAVEN-759"
+description = "fix: read RAVEN 3 model files, and tolerate a non-double rev"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "RAVEN",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "SysBioChalmers/RAVEN"
+ref = "2156ff13ea86ac080e980c815e2b8a914e57df1c"
+reference = "https://github.com/SysBioChalmers/RAVEN/pull/759"
+source_access = "auto"
+built_at = "2026-11-14T07:01:22.018812+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:9db61d2e36140a0c7313cf9cc64e2d317807e3246ec30faec156654408e08989"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-07T19:38:25Z"
+diff_format = "unified"
+context_files = [
+    "INIT/ftINIT.m",
+    "INIT/mergeLinear.m",
+    "doc/INIT/ftINIT.html",
+    "doc/INIT/mergeLinear.html",
+    "doc/io/importModel.html",
+    "doc/io/readYAMLmodel.html",
+    "io/importModel.m",
+    "io/readYAMLmodel.m",
+    "readme/RAVEN_structure_fields.csv",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2072
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,68 @@
+version = "1.0"
+
+[task]
+name = "default/SysBioChalmers__GECKO-485"
+description = "Let the BRENDA aggregation be chosen"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "GECKO",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "SysBioChalmers/GECKO"
+ref = "cbc4ca3311df8ca44c28792f40008b9cbef692bd"
+reference = "https://github.com/SysBioChalmers/GECKO/pull/485"
+source_access = "auto"
+built_at = "2026-11-14T07:02:05.960009+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:282c977bec5a99068eccd76350ee8d9f948bcd8a69abcbf8e69a551fdedbf608"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-10-04T18:23:52Z"
+diff_format = "unified"
+context_files = [
+    "databases/README.md",
+    "src/download_databases/loadBRENDAdata.m",
+    "src/download_databases/resolveKcatAggregation.m",
+    "src/gather_kcats/fuzzyKcatMatching.m",
+    "src/model_adapter/adapterTemplate.m",
+    "test/unit_tests/ecTestGEM/data/kcat.tsv",
+    "test/unit_tests/geckoCoreFunctionTests.m",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 195
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

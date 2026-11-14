@@ -1,0 +1,725 @@
+diff --git a/corneto/backend/_base.py b/corneto/backend/_base.py
+index beca791b..ee098b3e 100644
+--- a/corneto/backend/_base.py
++++ b/corneto/backend/_base.py
+@@ -847,6 +847,7 @@ def TotalVariation(
+         axis: int = -1,
+         weights: Optional[Union[Sequence[float], np.ndarray]] = None,
+         name: Optional[str] = None,
++        exact: bool = False,
+     ) -> ProblemDef:
+         """Build an entrywise graph total-variation expression.
+ 
+@@ -865,6 +866,8 @@ def TotalVariation(
+         variation expression to an objective or constrain it explicitly; no
+         objective is added automatically. The total scales linearly with the
+         magnitude of ``X`` and the number of rows summed for each pair.
++        With ``exact=True``, binary inputs use exact XOR magnitudes, including
++        when maximizing variation or when a pair has zero weight.
+ 
+         Args:
+             X: A nonempty real affine vector or matrix expression from this
+@@ -879,6 +882,12 @@ def TotalVariation(
+                 weights. Scalars are rejected.
+             name: Optional stable expression-name prefix. If omitted, a
+                 unique prefix is generated.
++            exact: If true, require binary inputs and enforce exact absolute
++                differences independently of the objective. Binary variables
++                are used directly; affine expressions are linked to auxiliary
++                binary selectors, constraining every entry of X to zero or
++                one. Nonbinary symbols are rejected. Defaults to false, which
++                retains the continuous absolute-value bound formulation.
+ 
+         Returns:
+             ProblemDef: A problem with the linear absolute-value
+@@ -891,6 +900,10 @@ def TotalVariation(
+         """
+         if not isinstance(X, CExpression):
+             raise TypeError("X must be a CORNETO CExpression")
++        if not isinstance(exact, (bool, np.bool_)):
++            raise TypeError("exact must be a boolean")
++        if exact and isinstance(X, CSymbol) and X._vartype != VarType.BINARY:
++            raise TypeError("exact=True requires binary inputs; nonbinary symbols are not supported")
+         shape = X.shape
+         ndim = len(shape)
+         if ndim not in (1, 2) or any(dim <= 0 for dim in shape):
+@@ -954,6 +967,12 @@ def TotalVariation(
+         elif not isinstance(name, str) or not name:
+             raise ValueError("name must be a nonempty string")
+ 
++        constraints = []
++        if exact and not isinstance(X, CSymbol):
++            selector = self.Variable(f"{name}_selector", shape, 0, 1, vartype=VarType.BINARY)
++            constraints.append(selector == X)
++            X = selector
++
+         if ndim == 1:
+             Z = X.reshape((1, shape[0]))
+         elif normalized_axis == 0:
+@@ -982,7 +1001,16 @@ def TotalVariation(
+             f"{name}_variation_by_pair": variation_by_pair,
+             f"{name}_total_variation": total_variation,
+         }
+-        constraints = [abs_bound >= difference, abs_bound >= -difference]
++        constraints += [abs_bound >= difference, abs_bound >= -difference]
++        if exact:
++            # For binary endpoints a and b, these upper bounds complete the
++            # XOR hull: |a-b| <= D <= min(a+b, 2-a-b).
++            endpoint_incidence = self._sparse(
++                (np.ones(2 * n_pairs), (incidence_rows, incidence_columns)),
++                shape=(connected_size, n_pairs),
++            )
++            endpoint_sum = (Z @ self.Constant(endpoint_incidence)).reshape((rows, n_pairs))
++            constraints += [abs_bound <= endpoint_sum, abs_bound <= 2 - endpoint_sum]
+         return self.Problem(constraints=constraints, expressions=expressions)
+ 
+     def Problem(
+@@ -1559,7 +1587,7 @@ def Indicator(
+         S = V
+         ub = V.ub
+         lb = V.lb
+-        if indexes:
++        if indexes is not None:
+             S = V[indexes]
+             ub = V.ub[indexes]
+             lb = V.lb[indexes]
+@@ -1588,6 +1616,66 @@ def Indicator(
+         c += [S >= indicator.multiply(lb), S <= indicator.multiply(ub)]
+         return self.Problem(c)
+ 
++    def ThresholdIndicator(
++        self,
++        V: CSymbol,
++        *,
++        indexes: Optional[Union[int, slice, Tuple, List, np.ndarray]] = None,
++        epsilon: Union[float, List[float], np.ndarray] = 1.0,
++        name: Optional[str] = None,
++        positive_name: Optional[str] = None,
++        negative_name: Optional[str] = None,
++    ) -> ProblemDef:
++        """Create optional positive and negative threshold implications.
++
++        A positive binary equal to one requires the bounded value to be at
++        least ``epsilon``. A negative binary equal to one requires it to be
++        at most ``-epsilon``. When both binaries are zero, the original bounds
++        remain available, including values between the thresholds. Reaching
++        a threshold does not require its binary to be one.
++
++        ``epsilon`` must be finite and positive, and may be an array
++        broadcastable to the selected value shape. A vector of thresholds
++        also accepts a backend's single-column representation of a vector.
++        The returned problem registers the sum of the mutually exclusive binaries under ``name``
++        (default ``<variable>_threshold``), with directional symbols named
++        ``<name>_positive`` and ``<name>_negative`` unless explicitly supplied.
++        Implications use linear constraints derived from the finite bounds.
++        """
++        if V._provided_lb is None or V._provided_ub is None:
++            raise ValueError("ThresholdIndicator requires finite lower and upper bounds.")
++        S = V if indexes is None else V[indexes]
++        lb = np.asarray(V.lb if indexes is None else V.lb[indexes], dtype=float).reshape(S.shape)
++        ub = np.asarray(V.ub if indexes is None else V.ub[indexes], dtype=float).reshape(S.shape)
++        if not np.all(np.isfinite(lb)) or not np.all(np.isfinite(ub)) or np.any(lb > ub):
++            raise ValueError("ThresholdIndicator requires finite ordered bounds.")
++        raw_epsilon = np.asarray(epsilon)
++        if raw_epsilon.dtype.kind not in {"i", "u", "f"}:
++            raise TypeError("epsilon must be a finite positive number or array.")
++        threshold_input = np.asarray(epsilon, dtype=float)
++        if len(S.shape) == 2 and S.shape[1] == 1 and threshold_input.shape == (S.shape[0],):
++            threshold_input = threshold_input.reshape(S.shape)
++        try:
++            threshold = np.broadcast_to(threshold_input, S.shape)
++        except ValueError as error:
++            raise ValueError("epsilon must be broadcastable to the selected value shape.") from error
++        if not np.all(np.isfinite(threshold)) or np.any(threshold <= 0):
++            raise ValueError("epsilon must be finite and positive.")
++        name = name or f"{V.name}_threshold"
++        positive = self.Variable(positive_name or f"{name}_positive", S.shape, 0, 1, vartype=VarType.BINARY)
++        negative = self.Variable(negative_name or f"{name}_negative", S.shape, 0, 1, vartype=VarType.BINARY)
++        problem = self.Problem(
++            [
++                positive + negative <= 1,
++                S >= lb + positive.multiply(threshold - lb),
++                S <= ub - negative.multiply(ub + threshold),
++                positive.multiply(np.asarray(ub < threshold, dtype=float)) == 0,
++                negative.multiply(np.asarray(lb > -threshold, dtype=float)) == 0,
++            ]
++        )
++        problem.register(name, positive + negative)
++        return problem
++
+     def ExactSupport(
+         self,
+         V: CSymbol,
+diff --git a/corneto/methods/_base.py b/corneto/methods/_base.py
+index 8fe6ba08..d9b2465f 100644
+--- a/corneto/methods/_base.py
++++ b/corneto/methods/_base.py
+@@ -183,12 +183,12 @@ def build_from_data(self, graph: BaseGraph, data: Optional[Data] = None) -> Prob
+         self.problem = self.create_problem(self.processed_graph, self.processed_data)
+ 
+         # Add structured sparsity regularization if needed.
+-        if not self.disable_structured_sparsity:
++        if not self.disable_structured_sparsity and self.lambda_reg_param.value > 0:
+             if self._reg_varname is not None:
+                 reg_var = self.problem.expr[self._reg_varname]
+                 newvar_name = self._reg_varname + self._reg_varname_suffix
+-                # A 1D vector can be summed directly without a linear OR.
+-                if len(reg_var.shape) == 1 or reg_var.shape[1] == 1 or reg_var.shape[0] == 1:
++                # A single condition (vector or one-column matrix) can be summed directly.
++                if len(reg_var.shape) == 1 or reg_var.shape[1] == 1:
+                     self.problem.add_objective(
+                         reg_var.sum(),
+                         weight=self.lambda_reg_param,
+diff --git a/corneto/methods/fba.py b/corneto/methods/fba.py
+index cd4a4041..fec30fff 100644
+--- a/corneto/methods/fba.py
++++ b/corneto/methods/fba.py
+@@ -264,7 +264,8 @@ def create_flow_based_problem(self, flow_problem, graph: BaseGraph, data: Data):
+         """
+         # The flow_problem is already created in the parent class
+         F = flow_problem.expr.flow
+-        flow_problem += self.backend.Indicator(F, name=self.flux_indicator_name)
++        if self._requires_flux_indicators():
++            flow_problem += self.backend.Indicator(F, name=self.flux_indicator_name)
+ 
+         for i, (sample_name, sample_data) in enumerate(data.samples.items()):
+             rxn_objectives = []
+@@ -305,6 +306,9 @@ def create_flow_based_problem(self, flow_problem, graph: BaseGraph, data: Data):
+ 
+         return flow_problem
+ 
++    def _requires_flux_indicators(self):
++        return True
++
+     @staticmethod
+     def references():
+         """Return citation keys for the method."""
+diff --git a/corneto/methods/imat.py b/corneto/methods/imat.py
+index 667fd22c..96a1ce56 100644
+--- a/corneto/methods/imat.py
++++ b/corneto/methods/imat.py
+@@ -9,7 +9,7 @@
+ 
+ import numpy as np
+ 
+-from corneto.backend._base import Backend
++from corneto.backend._base import Backend, VarType
+ from corneto.data import Data, Feature
+ from corneto.graph import BaseGraph
+ from corneto.methods._input_utils import (
+@@ -38,7 +38,8 @@ class MultiSampleIMAT(MultiSampleFBA):
+             Higher values encourage fewer active reactions. Defaults to 1e-3.
+         beta_reg (float, optional): Secondary regularization parameter for sparsity.
+             Used when both types of regularization are needed. Defaults to 0.0.
+-        eps (float, optional): Tolerance for considering a flux as non-zero.
++        eps (float, optional): Minimum flux magnitude earning a high-expression
++            agreement reward; smaller flux remains feasible without that reward.
+             Defaults to 1e-2.
+         scale (bool, optional): If True, normalize the nonzero iMAT score
+             weights independently for each condition so their absolute values
+@@ -320,6 +321,9 @@ def _apply_gpr_rules(self, graph: BaseGraph, data: Data) -> Data:
+ 
+         return result_data
+ 
++    def _requires_flux_indicators(self):
++        return self.lambda_reg_param.value > 0 or self.beta_reg.value > 0
++
+     def create_flow_based_problem(self, flow_problem, graph: BaseGraph, data: Data):
+         """Create the iMAT optimization problem.
+ 
+@@ -343,10 +347,7 @@ def create_flow_based_problem(self, flow_problem, graph: BaseGraph, data: Data):
+         # Get the flow variables created by parent class
+         F = flow_problem.expr.flow
+ 
+-        # Keep the full-size edge_has_flux indicator from the parent class for
+-        # structured regularization across samples. iMAT-specific nonzero
+-        # support vars are added only for scored reactions per sample below.
+-        unblocked = flow_problem.expr.edge_has_flux if self.use_bigm_constraints else None
++        unblocked = flow_problem.expr.edge_has_flux if self._requires_flux_indicators() else None
+ 
+         # Process weights for each sample
+         n_samples = len(data.samples)
+@@ -377,7 +378,7 @@ def create_flow_based_problem(self, flow_problem, graph: BaseGraph, data: Data):
+                 if denom > 0:
+                     weights = (weights / denom) * 100
+ 
+-            # Only non-zero scored reactions contribute to iMAT support vars/objectives.
++            # Only non-zero scored reactions contribute to iMAT agreement vars/objectives.
+             nonzero_mask = ~np.isclose(weights, 0.0)
+             if not np.any(nonzero_mask):
+                 continue
+@@ -385,60 +386,57 @@ def create_flow_based_problem(self, flow_problem, graph: BaseGraph, data: Data):
+             scored_indices = rxn_indices[nonzero_mask]
+             scored_weights = weights[nonzero_mask]
+ 
+-            # Add sparse support vars only for this sample's scored reactions.
+-            suffix_pos = f"_ipos_s{i}"
+-            suffix_neg = f"_ineg_s{i}"
+-            if n_samples > 1 and len(F.shape) > 1:
+-                indicator_indexes = (scored_indices, i)
+-            else:
+-                indicator_indexes = scored_indices
+-
+-            flow_problem += self.backend.NonZeroIndicator(
+-                F,
+-                indexes=indicator_indexes,
+-                tolerance=self.eps,
+-                suffix_pos=suffix_pos,
+-                suffix_neg=suffix_neg,
+-            )
+-
+-            sample_active = flow_problem.expr[f"{F.name}{suffix_neg}"] + flow_problem.expr[f"{F.name}{suffix_pos}"]
+-
+-            # Split into highly and lowly expressed reactions
++            # Agreement binaries are separate from network selection.
++            sample_indexes = (scored_indices, i) if n_samples > 1 and len(F.shape) > 1 else scored_indices
++            sample_flux = F[sample_indexes]
++            lower = F.lb[sample_indexes]
++            upper = F.ub[sample_indexes]
+             idx_pos = np.where(scored_weights > 0)[0]
+             idx_neg = np.where(scored_weights < 0)[0]
+-            if self.use_bigm_constraints:
+-                if n_samples > 1 and len(unblocked.shape) > 1:
+-                    unblocked_sample = unblocked[scored_indices, i]
+-                else:
+-                    unblocked_sample = unblocked[scored_indices]
+-                flow_problem += sample_active <= unblocked_sample
+-            else:
+-                unblocked_sample = sample_active
+-
+-            # Add objectives for highly expressed reactions
+             sample_name_str = str(sample_name).replace(" ", "_")
+ 
+             if len(idx_pos) > 0:
+-                pos_weights = scored_weights[idx_pos]
++                positive_indices = scored_indices[idx_pos]
++                indexes = (positive_indices, i) if n_samples > 1 and len(F.shape) > 1 else positive_indices
++                agreement_name = f"imat_agreement_s{i}"
++                flow_problem += self.backend.ThresholdIndicator(
++                    F,
++                    indexes=indexes,
++                    epsilon=self.eps,
++                    name=agreement_name,
++                    positive_name=f"{F.name}_ipos_s{i}",
++                    negative_name=f"{F.name}_ineg_s{i}",
++                )
++                agreement = flow_problem.expr[agreement_name]
++                if unblocked is not None:
++                    flow_problem += agreement <= unblocked[indexes]
+                 flow_problem.add_objective(
+-                    pos_weights @ (1 - sample_active[idx_pos]),
++                    scored_weights[idx_pos] @ (1 - agreement),
+                     name=f"imat_fit_pos_{sample_name_str}_{i}",
+                 )
+ 
+-            # Add objectives for lowly expressed reactions
+             if len(idx_neg) > 0:
+-                neg_weights = scored_weights[idx_neg]
++                negative_indices = scored_indices[idx_neg]
++                indexes = (negative_indices, i) if n_samples > 1 and len(F.shape) > 1 else negative_indices
+                 if self.use_bigm_constraints:
+-                    # 1 if the reactions is unblocked (can have positive/negative flux)
+-                    flow_problem.add_objective(
+-                        np.abs(neg_weights) @ unblocked_sample[idx_neg],
+-                        name=f"imat_fit_neg_{sample_name_str}_{i}",
+-                    )
++                    if unblocked is not None:
++                        mismatch = unblocked[indexes]
++                    else:
++                        indicator_name = f"imat_unblocked_s{i}"
++                        flow_problem += self.backend.Indicator(F, indexes=indexes, name=indicator_name)
++                        mismatch = flow_problem.expr[indicator_name]
+                 else:
+-                    flow_problem.add_objective(
+-                        np.abs(neg_weights) @ sample_active[idx_neg],
+-                        name=f"imat_fit_neg_{sample_name_str}_{i}",
++                    # Preserve the approximate-zero option: declining inactivity
++                    # permits the original range, earning it permits |v| <= eps.
++                    mismatch = self.backend.Variable(
++                        f"imat_mismatch_s{i}", (len(idx_neg),), 0, 1, vartype=VarType.BINARY
+                     )
++                    flow_problem += sample_flux[idx_neg] >= -self.eps + mismatch.multiply(lower[idx_neg] + self.eps)
++                    flow_problem += sample_flux[idx_neg] <= self.eps + mismatch.multiply(upper[idx_neg] - self.eps)
++                flow_problem.add_objective(
++                    np.abs(scored_weights[idx_neg]) @ mismatch,
++                    name=f"imat_fit_neg_{sample_name_str}_{i}",
++                )
+ 
+         return flow_problem
+ 
+diff --git a/docs/api/corneto.backend.rst b/docs/api/corneto.backend.rst
+index 4ff196ef..52b623b7 100644
+--- a/docs/api/corneto.backend.rst
++++ b/docs/api/corneto.backend.rst
+@@ -32,7 +32,7 @@ size of the other axis, or one for a vector. When ``name`` is omitted, a
+ unique prefix is generated. Explicit prefixes should be distinct in a
+ composed problem. No objective is added automatically.
+ 
+-The primitive adds continuous variables ``D`` and constraints
++By default (``exact=False``), the primitive adds continuous variables ``D`` and constraints
+ ``D >= difference`` and ``D >= -difference`` with ``D >= 0``. Thus the
+ registered total variation is an upper bound until an objective or another
+ constraint tightens ``D``; ``X`` does not need variable bounds. A positive
+@@ -49,6 +49,34 @@ to be piecewise constant. Its scale depends on the magnitude and units of
+ weights; multiplying ``X`` by a scalar multiplies the variation by its
+ absolute value.
+ 
++For binary selections, ``exact=True`` makes every absolute difference equal
++to the pairwise XOR, independently of the objective and including zero-weight
++pairs. Binary variables are accepted directly. Affine expressions (including
++slices and sums of selection indicators) are linked to auxiliary binary
++selectors, explicitly restricting every input entry to zero or one. Nonbinary
++symbols are rejected; this mode does not compute exact absolute values for
++general continuous or integer inputs.
++
++For binary endpoints ``a`` and ``b``, exact mode adds ``D <= a + b`` and
++``D <= 2 - a - b`` to the usual lower bounds. These force
++``D = abs(a - b)`` while keeping ``D`` continuous. The registered names and
++shapes are unchanged. This permits maximizing switch counts or imposing a
++lower bound on switching. For example, after constraining the union size to
++its previously obtained optimum, use the following as the diagnostic's sole
++objective (CORNETO minimizes by default):
++
++.. code-block:: python
++
++    tv = backend.TotalVariation(
++        selected,
++        pairs=[(0, 1), (1, 2)],
++        axis=1,
++        exact=True,
++        name="switches",
++    )
++    problem += tv
++    problem.add_objective(-tv.expr.switches_total_variation)
++
+ For a continuous expression whose rows represent signals over three ordered
+ conditions, connect adjacent columns and add the variation penalty to any
+ existing model objective:
+diff --git a/docs/releases/index.md b/docs/releases/index.md
+index c4586887..9028eaab 100644
+--- a/docs/releases/index.md
++++ b/docs/releases/index.md
+@@ -7,6 +7,7 @@ This section contains detailed release notes for CORNETO versions, documenting n
+ ```{toctree}
+ :maxdepth: 1
+ 
++v1.0.0-rc.8
+ v1.0.0-rc.7
+ v1.0.0-rc.6
+ v1.0.0-rc.5
+diff --git a/docs/releases/v1.0.0-rc.8.md b/docs/releases/v1.0.0-rc.8.md
+new file mode 100644
+index 00000000..ab8bc448
+--- /dev/null
++++ b/docs/releases/v1.0.0-rc.8.md
+@@ -0,0 +1,19 @@
++# Release v1.0.0-rc.8 {bdg-warning}`Pre-release`
++
++CORNETO 1.0.0 RC8 improves binary total-variation modeling and fixes iMAT
++threshold and structured-regularization behavior.
++
++## Highlights
++
++- Added exact total variation for binary selections, including support for
++  maximizing switch counts and handling zero-weight pairs.
++- Fixed iMAT threshold rewards so flux below the activity threshold remains
++  feasible without receiving the high-expression reward.
++- Avoided unnecessary flux indicators when structured regularization is off,
++  and corrected reaction-union regularization for single-condition models.
++
++## Compatibility
++
++The total-variation API adds an optional `exact` argument. Its default keeps
++the existing continuous absolute-value formulation. iMAT now treats its
++activity threshold as a reward condition rather than a feasibility restriction.
+diff --git a/tests/methods/test_imat.py b/tests/methods/test_imat.py
+index 01330232..7b4b4c07 100644
+--- a/tests/methods/test_imat.py
++++ b/tests/methods/test_imat.py
+@@ -5,7 +5,8 @@
+ import numpy as np
+ import pytest
+ 
+-from corneto.backend import PicosBackend
++from corneto import Graph
++from corneto.backend import CvxpyBackend, PicosBackend, VarType
+ from corneto.data import Data
+ from corneto.io import import_miom_model
+ from corneto.methods.fba import MultiSampleFBA
+@@ -15,6 +16,85 @@
+ SOLVER = "highs"
+ 
+ 
++@pytest.mark.parametrize("score", [1.0, -1.0])
++@pytest.mark.parametrize("required_flux", [0.005, -0.005])
++@pytest.mark.parametrize("n_conditions", [1, 2])
++@pytest.mark.parametrize("use_bigm_constraints", [True, False])
++def test_imat_required_subthreshold_flux_accepts_expression_mismatch(
++    score, required_flux, n_conditions, use_bigm_constraints
++):
++    """Expression agreement is optional when mass balance requires small flux."""
++    graph = Graph()
++    graph.add_edge((), "A", id="Supply", default_lb=-1, default_ub=1)
++    graph.add_edge("A", (), id="Demand", default_lb=-1, default_ub=1)
++    bounds = {
++        f"s{i}": {
++            "Supply": (min(0, required_flux), max(0, required_flux)),
++            "Demand": (required_flux, required_flux),
++        }
++        for i in range(n_conditions)
++    }
++
++    fba_problem = MultiSampleFBA(backend=CvxpyBackend()).build_many(graph, reaction_bounds=bounds)
++    assert fba_problem.solve(solver="SCIPY").status == "optimal"
++
++    problem = MultiSampleIMAT(backend=CvxpyBackend(), eps=0.01, use_bigm_constraints=use_bigm_constraints).build_many(
++        graph,
++        reaction_scores={f"s{i}": {"Supply": score} for i in range(n_conditions)},
++        reaction_bounds=bounds,
++    )
++    result = problem.solve(solver="SCIPY")
++
++    assert result.status == "optimal"
++    np.testing.assert_allclose(problem.expr.flow.value, required_flux, atol=1e-8)
++    # High expression misses the activity threshold. In exact-zero mode,
++    # low expression also incurs a mismatch because the reaction carries flux.
++    if score > 0 or use_bigm_constraints:
++        assert result.value == pytest.approx(n_conditions)
++    else:
++        assert result.value == pytest.approx(0)
++
++
++@pytest.mark.parametrize("n_reactions,n_conditions", [(1, 2), (1, 3), (1, 1), (3, 1), (3, 2)])
++def test_imat_union_regularizes_each_reaction_once(n_reactions, n_conditions):
++    graph = Graph()
++    for reaction in range(n_reactions):
++        # Self-loops allow fixed nonzero flux while satisfying mass balance.
++        graph.add_edge(f"A{reaction}", f"A{reaction}", id=f"R{reaction}", default_lb=1, default_ub=1)
++
++    problem = MultiSampleIMAT(lambda_reg=1, beta_reg=0, backend=CvxpyBackend()).build_many(
++        graph,
++        reaction_scores={
++            f"s{condition}": {f"R{reaction}": 1 for reaction in range(n_reactions)} for condition in range(n_conditions)
++        },
++    )
++    result = problem.solve(solver="SCIPY")
++
++    assert result.status == "optimal"
++    expected_shape = (n_reactions,) if n_conditions == 1 else (n_reactions, n_conditions)
++    np.testing.assert_allclose(problem.expr.edge_has_flux.value, np.ones(expected_shape))
++    # Every positive score is satisfied, leaving only the reaction union cost.
++    assert result.value == pytest.approx(n_reactions)
++
++
++@pytest.mark.parametrize("lambda_reg,beta_reg,expected_binaries", [(0, 0, 6), (1, 0, 13), (0, 1, 10)])
++def test_imat_reuses_selection_binaries_only_when_regularizing(lambda_reg, beta_reg, expected_binaries):
++    graph = Graph()
++    for reaction in ("high", "low", "unscored"):
++        graph.add_edge("A", "A", id=reaction, default_lb=-1, default_ub=1)
++    problem = MultiSampleIMAT(backend=CvxpyBackend(), lambda_reg=lambda_reg, beta_reg=beta_reg).build_many(
++        graph, reaction_scores={"s0": {"high": 1, "low": -1}, "s1": {"high": 1, "low": -1}}
++    )
++    binaries = sum(
++        int(np.prod(symbol.shape)) for symbol in problem.symbols.values() if symbol._vartype == VarType.BINARY
++    )
++    assert binaries == expected_binaries
++    assert ("edge_has_flux" in problem.expr) == (lambda_reg > 0 or beta_reg > 0)
++    assert ("edge_has_flux_OR" in problem.expr) == (lambda_reg > 0)
++    assert ("imat_unblocked_s0" in problem.expr) == (lambda_reg == 0 and beta_reg == 0)
++    assert problem.solve(solver="SCIPY").status == "optimal"
++
++
+ @pytest.fixture
+ def metabolic_network():
+     """Load the mitocore metabolic network."""
+@@ -249,7 +329,7 @@ def test_multi_sample_imat_different_expression(metabolic_network, backend):
+ 
+ 
+ def test_imat_multisample_support_vars_sparse_per_sample(metabolic_network, backend):
+-    """IMAT should create nonzero support vars only for non-zero scored reactions."""
++    """Plain iMAT creates only the agreement binaries required by its scores."""
+     imat = MultiSampleIMAT(backend=backend, lambda_reg=0.0)
+     data = Data.from_cdict(
+         {
+@@ -269,19 +349,18 @@ def test_imat_multisample_support_vars_sparse_per_sample(metabolic_network, back
+ 
+     problem = imat.build(metabolic_network, data)
+ 
+-    # Full-size regularization indicator should remain available for cross-sample OR.
+-    assert problem.expr.edge_has_flux.shape[0] == metabolic_network.num_edges
+-    assert problem.expr.edge_has_flux.shape[1] == 2
+-
+-    # Sparse per-sample support vars: sample1 has 2 non-zero scores, sample2 has 1.
+-    n_s1 = int(np.prod(problem.expr._flow_ipos_s0.shape))
+-    n_s2 = int(np.prod(problem.expr._flow_ipos_s1.shape))
+-    assert n_s1 == 2
+-    assert n_s2 == 1
+-    assert int(np.prod(problem.expr._flow_ineg_s0.shape)) == 2
+-    assert int(np.prod(problem.expr._flow_ineg_s1.shape)) == 1
+-
+-    # Legacy full-size iMAT support vars should not be created anymore.
++    # Plain iMAT needs no full-network selection or condition-union binaries.
++    assert "edge_has_flux" not in problem.expr
++    assert "edge_has_flux_OR" not in problem.expr
++
++    # Only the high-expression reaction gets directional threshold binaries.
++    assert int(np.prod(problem.expr._flow_ipos_s0.shape)) == 1
++    assert int(np.prod(problem.expr._flow_ineg_s0.shape)) == 1
++    assert "_flow_ipos_s1" not in problem.expr
++    assert "_flow_ineg_s1" not in problem.expr
++    # Low-expression reactions each use one blocking binary.
++    assert int(np.prod(problem.expr.imat_unblocked_s0.shape)) == 1
++    assert int(np.prod(problem.expr.imat_unblocked_s1.shape)) == 1
+     assert "_flow_ipos" not in problem.expr
+     assert "_flow_ineg" not in problem.expr
+ 
+diff --git a/tests/test_backend_threshold_indicator.py b/tests/test_backend_threshold_indicator.py
+new file mode 100644
+index 00000000..1dadaaea
+--- /dev/null
++++ b/tests/test_backend_threshold_indicator.py
+@@ -0,0 +1,64 @@
++"""Behavior of optional threshold implications on bounded values."""
++
++import numpy as np
++import pytest
++
++
++@pytest.mark.parametrize("values", [[-0.005, 0, 0.005], [-0.01, 0, 0.01], [-0.02, 0, 0.02]])
++def test_threshold_indicator_rewards_only_reached_thresholds(backend, values):
++    x = backend.Variable("x", (3,), -1, 1)
++    problem = backend.ThresholdIndicator(x, epsilon=0.01)
++    problem += x == np.array(values)
++    problem.add_objective(-problem.expr.x_threshold.sum())
++    problem.solve()
++
++    np.testing.assert_allclose(np.asarray(x.value).reshape(-1), values, atol=1e-7)
++    expected = np.asarray(values)
++    np.testing.assert_allclose(
++        np.asarray(problem.expr.x_threshold_positive.value).reshape(-1), expected >= 0.01, atol=1e-7
++    )
++    np.testing.assert_allclose(
++        np.asarray(problem.expr.x_threshold_negative.value).reshape(-1), expected <= -0.01, atol=1e-7
++    )
++
++
++def test_threshold_indicator_declining_rewards_preserves_full_range(backend):
++    x = backend.Variable("x", (3,), -1, 1)
++    problem = backend.ThresholdIndicator(x, epsilon=0.01)
++    problem += problem.expr.x_threshold_positive == 0
++    problem += problem.expr.x_threshold_negative == 0
++    problem += x == np.array([-1, 0.005, 1])
++    problem.solve()
++    np.testing.assert_allclose(np.asarray(x.value).reshape(-1), [-1, 0.005, 1], atol=1e-7)
++
++
++def test_threshold_indicator_selected_matrix_bounds_and_thresholds(backend):
++    x = backend.Variable("x", (2, 2), lb=np.array([[-1, -0.005], [0, 0]]), ub=np.ones((2, 2)))
++    problem = backend.ThresholdIndicator(x, indexes=(np.array([0, 1]), 1), epsilon=[0.01, 0.02], name="agreement")
++    problem += x[:, 1] == np.array([-0.005, 0.02])
++    problem.add_objective(-problem.expr.agreement.sum())
++    problem.solve()
++    np.testing.assert_allclose(np.asarray(problem.expr.agreement.value).reshape(-1), [0, 1], atol=1e-7)
++
++
++@pytest.mark.parametrize("epsilon", [0, -1, np.inf, np.nan])
++def test_threshold_indicator_rejects_invalid_thresholds(backend, epsilon):
++    x = backend.Variable("x", (2,), -1, 1)
++    with pytest.raises(ValueError, match="epsilon"):
++        backend.ThresholdIndicator(x, epsilon=epsilon)
++
++
++@pytest.mark.parametrize("epsilon", [True, "0.1", 1j])
++def test_threshold_indicator_rejects_nonnumeric_thresholds(backend, epsilon):
++    x = backend.Variable("x", (2,), -1, 1)
++    with pytest.raises(TypeError, match="epsilon"):
++        backend.ThresholdIndicator(x, epsilon=epsilon)
++
++
++def test_threshold_indicator_requires_finite_bounds_and_matching_shapes(backend):
++    x = backend.Variable("x", (2,))
++    with pytest.raises(ValueError, match="bounds"):
++        backend.ThresholdIndicator(x)
++    bounded = backend.Variable("bounded", (2,), -1, 1)
++    with pytest.raises(ValueError, match="broadcastable"):
++        backend.ThresholdIndicator(bounded, epsilon=[0.01, 0.02, 0.03])
+diff --git a/tests/test_backend_total_variation.py b/tests/test_backend_total_variation.py
+index e88846b2..bc77a514 100644
+--- a/tests/test_backend_total_variation.py
++++ b/tests/test_backend_total_variation.py
+@@ -189,6 +189,67 @@ def test_total_variation_named_and_automatic_primitives_compose(backend):
+     assert {f"{prefix}_abs_bound" for prefix in auto_prefixes}.issubset(combined.symbols)
+ 
+ 
++@pytest.mark.parametrize("objective_weight", [1, -1, 0])
++@pytest.mark.parametrize("axis", [0, 1, -1])
++def test_total_variation_exact_binary_truth_table(backend, objective_weight, axis):
++    values = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
++    fixed = values.T if axis == 0 else values
++    x = backend.Variable("x", fixed.shape, vartype=VarType.BINARY)
++    tv = backend.TotalVariation(
++        x, pairs=[(0, 1), (1, 0), (0, 1)], axis=axis, weights=[2, 3, 0], name="exact", exact=True
++    )
++    problem = backend.Problem(x == fixed) + tv
++    if objective_weight:
++        problem.add_objective(problem.expr.exact_total_variation, weight=objective_weight)
++    result = _solve(problem)
++
++    assert str(result.status).lower() == "optimal"
++    np.testing.assert_allclose(problem.expr.exact_abs_bound.value, [[0, 0, 0], [1, 1, 1], [1, 1, 1], [0, 0, 0]])
++    np.testing.assert_allclose(problem.expr.exact_difference.value, [[0, 0, 0], [1, -1, 1], [-1, 1, -1], [0, 0, 0]])
++    assert np.isclose(float(problem.expr.exact_total_variation.value), 10)
++
++
++@pytest.mark.parametrize("shape", [(3,), (1, 3)])
++def test_total_variation_exact_binary_single_reaction(backend, shape):
++    x = backend.Variable("x", shape, vartype=VarType.BINARY)
++    tv = backend.TotalVariation(x, pairs=[(0, 1), (1, 2)], name="single", exact=True)
++    problem = backend.Problem(x == np.array([1, 1, 0]).reshape(shape)) + tv
++    problem.add_objective(-problem.expr.single_total_variation)
++    _solve(problem)
++    np.testing.assert_allclose(problem.expr.single_abs_bound.value, [[0, 1]])
++    assert np.isclose(float(problem.expr.single_total_variation.value), 1)
++
++
++def test_total_variation_exact_maximizes_switches_at_fixed_union(backend):
++    x = backend.Variable("x", (2, 3), vartype=VarType.BINARY)
++    problem = backend.linear_or(x, axis=1, varname="union")
++    problem += problem.expr.union.sum() == 1
++    problem += backend.TotalVariation(x, pairs=[(0, 1), (1, 2)], name="switches", exact=True)
++    problem.add_objective(-problem.expr.switches_total_variation)
++    _solve(problem)
++    actual = np.abs(np.diff(np.asarray(x.value), axis=1)).sum()
++    assert np.isclose(actual, 2)
++    assert np.isclose(float(problem.expr.switches_total_variation.value), actual)
++
++
++def test_total_variation_exact_affine_selection_enforces_binary_values(backend):
++    x = backend.Variable("x", (2, 3), vartype=VarType.BINARY)
++    # A sum of binary indicators need not itself be binary without constraints.
++    selected = x[0, :] + x[1, :]
++    problem = backend.TotalVariation(selected, pairs=[(0, 1), (1, 2)], name="selection", exact=True)
++    problem.add_objective(-selected.sum())
++    _solve(problem)
++    np.testing.assert_allclose(np.asarray(selected.value).ravel(), [1, 1, 1])
++    np.testing.assert_allclose(problem.expr.selection_abs_bound.value, [[0, 0]])
++
++
++@pytest.mark.parametrize("vartype", [VarType.CONTINUOUS, VarType.INTEGER])
++def test_total_variation_exact_rejects_nonbinary_symbols(backend, vartype):
++    x = backend.Variable("x", (2,), lb=0, ub=1, vartype=vartype)
++    with pytest.raises(TypeError, match="binary inputs"):
++        backend.TotalVariation(x, pairs=[(0, 1)], exact=True)
++
++
+ @pytest.mark.parametrize(
+     "shape, kwargs, error",
+     [
+@@ -209,6 +270,7 @@ def test_total_variation_named_and_automatic_primitives_compose(backend):
+         ((3,), {"pairs": [(0, 1)], "weights": [np.inf]}, ValueError),
+         ((3,), {"pairs": [(0, 1)], "weights": [np.nan]}, ValueError),
+         ((3,), {"pairs": [(0, 1)], "weights": [1j]}, ValueError),
++        ((3,), {"pairs": [(0, 1)], "exact": "yes"}, TypeError),
+     ],
+ )
+ def test_total_variation_rejects_invalid_inputs(backend, shape, kwargs, error):

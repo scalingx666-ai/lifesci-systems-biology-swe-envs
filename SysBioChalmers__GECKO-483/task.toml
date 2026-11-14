@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/SysBioChalmers__GECKO-483"
+description = "tutorials: regenerate full_ecModel ecYeastGEM.yml with GECKO 4 and RAVEN 3"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "GECKO",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "SysBioChalmers/GECKO"
+ref = "d415d7f5f183f61f1bb77b970b7c80a7ffe61b03"
+reference = "https://github.com/SysBioChalmers/GECKO/pull/483"
+source_access = "auto"
+built_at = "2026-11-14T07:02:14.213023+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:4c7f5fabd2d4551d118edc4cb110f955228a0c25e5cdf3c2a59300b68733faf8"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-09-12T06:35:15Z"
+diff_format = "unified"
+context_files = [
+    "tutorials/full_ecModel/models/ecYeastGEM.yml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 467753
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

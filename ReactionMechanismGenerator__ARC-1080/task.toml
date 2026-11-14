@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/ReactionMechanismGenerator__ARC-1080"
+description = "Compare copies of the species mols when checking the thermo library for isomorphs"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "ARC",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "ReactionMechanismGenerator/ARC"
+ref = "3491f59963fe69ef55d6c045d5c874e64266ab65"
+reference = "https://github.com/ReactionMechanismGenerator/ARC/pull/1080"
+source_access = "auto"
+built_at = "2026-11-14T07:03:50.743577+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:3c1c3f81bc62eefbe12fb4880dc45d998b4a4bbe2ddfdc1777e8ee8adc97c6e7"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-14T05:22:57Z"
+diff_format = "unified"
+context_files = [
+    "arc/processor.py",
+    "arc/processor_test.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 15
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

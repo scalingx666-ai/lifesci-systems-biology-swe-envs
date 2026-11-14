@@ -1,0 +1,67 @@
+version = "1.0"
+
+[task]
+name = "default/RasmussenLab__MOVE-100"
+description = "✨ Prodigy"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "MOVE",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "RasmussenLab/MOVE"
+ref = "9d63bf7e9c8c1066237065e855363a10d4d31e40"
+reference = "https://github.com/RasmussenLab/MOVE/pull/100"
+source_access = "auto"
+built_at = "2026-11-14T07:02:06.654535+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:01f35ef4facb4ffa084eb5beca4aa9a45d13212bc91316970435cefb91263dbe"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2024-10-01T09:27:59Z"
+diff_format = "unified"
+context_files = [
+    "src/move/conf/__init__.py",
+    "src/move/conf/optim.py",
+    "src/move/conf/training.py",
+    "src/move/training/loop.py",
+    "src/move/training/optim/__init__.py",
+    "src/move/training/optim/prodigy.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 337
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

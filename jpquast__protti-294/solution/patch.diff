@@ -1,0 +1,159 @@
+diff --git a/NEWS.md b/NEWS.md
+index eecd62cc..d49349ed 100644
+--- a/NEWS.md
++++ b/NEWS.md
+@@ -5,6 +5,7 @@
+ * `calculate_peptide_abundance()` new function to calculate peptide abundances from precursor abundances.
+ * `fit_drc_4p()` received the `show_progress` argument that is by default `TRUE` and allows the user to show or hide progress bars. This closes issue #278.
+ * `assign_missingness()` gained the `completeness_MNAR_reference` argument, allowing users to control how complete a condition must be to be considered sufficiently observed when assigning MNAR missingness. This closes issue #200.
++* `calculate_aa_scores()` gained a `methods` argument, allowing user to choose between additive or the new multiplicative score calculation mode. The function now also returns min-max normalised scores in addition to raw values.
+ 
+ ## Bug fixes
+ 
+diff --git a/R/calculate_aa_scores.R b/R/calculate_aa_scores.R
+index 5bdf151d..a6418d10 100644
+--- a/R/calculate_aa_scores.R
++++ b/R/calculate_aa_scores.R
+@@ -19,6 +19,8 @@
+ #' data frame. Default is not retaining additional columns \code{retain_columns = NULL}. Specific
+ #' columns can be retained by providing their names (not in quotations marks, just like other
+ #' column names, but in a vector).
++#' @param method a character argument selecting the method used for score calculation.
++#' Supported are "multiplicative" = `-log10(adj_pval) * abs(diff)` (default) or "additive" = `-log10(adj_pval) + abs(diff)`.
+ #'
+ #' @return A data frame that contains the aggregated scores per amino acid position, enabling to
+ #' draw fingerprints for each individual protein.
+@@ -51,12 +53,22 @@ calculate_aa_scores <- function(data,
+                                 adj_pval = adj_pval,
+                                 start_position,
+                                 end_position,
+-                                retain_columns = NULL) {
++                                retain_columns = NULL,
++                                method = "multiplicative") {
++  # validate method input
++  method <- match.arg(method, c("multiplicative", "additive"))
++
+   output <- data %>%
+     dplyr::ungroup() %>%
+     dplyr::distinct({{ protein }}, {{ diff }}, {{ adj_pval }}, {{ start_position }}, {{ end_position }}) %>%
+     tidyr::drop_na({{ diff }}, {{ adj_pval }}) %>%
+-    dplyr::mutate(score = -log10({{ adj_pval }}) * abs({{ diff }})) %>%
++    dplyr::mutate(
++      score = if (method == "multiplicative") {
++        -log10({{ adj_pval }}) * abs({{ diff }})
++      } else if (method == "additive") {
++        -log10({{ adj_pval }}) + abs({{ diff }})
++      }
++    ) %>%
+     dplyr::rowwise() %>%
+     dplyr::mutate(residue = list(seq({{ start_position }}, {{ end_position }}))) %>%
+     tidyr::unnest("residue") %>%
+@@ -64,17 +76,34 @@ calculate_aa_scores <- function(data,
+     dplyr::mutate(amino_acid_score = mean(.data$score)) %>%
+     dplyr::distinct({{ protein }}, .data$residue, .data$amino_acid_score)
+ 
++  # normalization (per protein)
++  output <- output %>%
++    dplyr::group_by({{ protein }}) %>%
++    dplyr::mutate(
++      amino_acid_score_normalized = {
++        min_val <- min(.data$amino_acid_score, na.rm = TRUE)
++        max_val <- max(.data$amino_acid_score, na.rm = TRUE)
++        if (max_val == min_val) {
++          1 # avoid division by zero; constant protein gets 1
++        } else {
++          (.data$amino_acid_score - min_val) / (max_val - min_val)
++        }
++      }
++    ) %>%
++    dplyr::ungroup()
+ 
+   if (!missing(retain_columns)) {
+     output <- data %>%
+       dplyr::select(!!enquo(retain_columns), colnames(output)[!colnames(output) %in% c(
+         "residue",
+-        "amino_acid_score"
++        "amino_acid_score",
++        "amino_acid_score_normalized"
+       )]) %>%
+       dplyr::distinct() %>%
+       dplyr::right_join(output, by = colnames(output)[!colnames(output) %in% c(
+         "residue",
+-        "amino_acid_score"
++        "amino_acid_score",
++        "amino_acid_score_normalized"
+       )])
+   }
+ 
+diff --git a/R/calculate_go_enrichment.R b/R/calculate_go_enrichment.R
+index cc119cde..41149e00 100644
+--- a/R/calculate_go_enrichment.R
++++ b/R/calculate_go_enrichment.R
+@@ -385,7 +385,7 @@ if you used the right organism ID.", prefix = "\n", initial = ""))
+     groups_to_skip <- cont_table %>%
+       dplyr::group_by({{ group }}) %>%
+       dplyr::summarise(n_levels = dplyr::n_distinct({{ is_significant }}), .groups = "drop") %>%
+-      dplyr::filter(n_levels < 2) %>%
++      dplyr::filter(.data$n_levels < 2) %>%
+       dplyr::pull({{ group }})
+ 
+     cont_table <- cont_table %>%
+diff --git a/R/qc_sample_correlation.R b/R/qc_sample_correlation.R
+index 55c06008..c0287bdd 100644
+--- a/R/qc_sample_correlation.R
++++ b/R/qc_sample_correlation.R
+@@ -136,7 +136,7 @@ qc_sample_correlation <- function(data,
+     heatmap_interactive <-
+       heatmaply::heatmaply(
+         correlation,
+-        main = "Correlation based hirachical clustering of samples",
++        main = "Correlation based hierarchical clustering of samples",
+         col_side_colors = annotation,
+         col_side_palette = c(
+           annotation_colours[[1]],
+@@ -190,7 +190,7 @@ qc_sample_correlation <- function(data,
+         cluster_cols = stats::as.hclust(dendrogram_column),
+         annotation = annotation,
+         annotation_colors = annotation_colours,
+-        main = "Correlation based hierachical clustering of samples",
++        main = "Correlation based hierarchical clustering of samples",
+         color = viridis_colours,
+         silent = TRUE
+       )
+diff --git a/man/calculate_aa_scores.Rd b/man/calculate_aa_scores.Rd
+index 8a8247b7..9e0ff4e1 100644
+--- a/man/calculate_aa_scores.Rd
++++ b/man/calculate_aa_scores.Rd
+@@ -11,7 +11,8 @@ calculate_aa_scores(
+   adj_pval = adj_pval,
+   start_position,
+   end_position,
+-  retain_columns = NULL
++  retain_columns = NULL,
++  method = "multiplicative"
+ )
+ }
+ \arguments{
+@@ -33,6 +34,9 @@ precursor.}
+ data frame. Default is not retaining additional columns \code{retain_columns = NULL}. Specific
+ columns can be retained by providing their names (not in quotations marks, just like other
+ column names, but in a vector).}
++
++\item{method}{a character argument selecting the method used for score calculation.
++supported are "multiplicative" = -log10(adj_pval) * abs(diff) (default) or "additive" = -log10(adj_pval) + abs(diff)}
+ }
+ \value{
+ A data frame that contains the aggregated scores per amino acid position, enabling to
+diff --git a/tests/testthat/test-workflow.R b/tests/testthat/test-workflow.R
+index 0bc4cdd2..d528f4ab 100644
+--- a/tests/testthat/test-workflow.R
++++ b/tests/testthat/test-workflow.R
+@@ -852,7 +852,7 @@ test_that("calculate_aa_scores works", {
+ 
+   expect_is(aa_fingerprint, "data.frame")
+   expect_equal(nrow(aa_fingerprint), 45)
+-  expect_equal(ncol(aa_fingerprint), 3)
++  expect_equal(ncol(aa_fingerprint), 4)
+ })
+ 
+ # Test for random forest imputation

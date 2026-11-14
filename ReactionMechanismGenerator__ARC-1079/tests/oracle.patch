@@ -1,0 +1,1594 @@
+diff --git a/arc/job/local.py b/arc/job/local.py
+index c4a2928215..ac1eb601c5 100644
+--- a/arc/job/local.py
++++ b/arc/job/local.py
+@@ -14,11 +14,13 @@
+ from arc.common import get_logger
+ from arc.exceptions import SettingsError
+ from arc.imports import settings
+-from arc.job.ssh import check_job_status_in_stdout
++from arc.job.ssh import SUBMISSION_CAP_WAIT_SECONDS, check_job_status_in_stdout
+ 
+ 
+ logger = get_logger()
+ 
++SUBMISSION_CAP_REACHED = 'cap_reached'
++
+ servers, check_status_command, submit_command, submit_filenames, delete_command, output_filenames = \
+     settings['servers'], settings['check_status_command'], settings['submit_command'], settings['submit_filenames'],\
+     settings['delete_command'], settings['output_filenames']
+@@ -221,24 +223,50 @@ def parse_running_jobs_ids(stdout: list[str],
+     return running_job_ids
+ 
+ 
++def _submission_cap_reached(cluster_soft: str, stderr: list[str]) -> bool:
++    """
++    Whether the scheduler refused a submission because the per-user job cap is reached.
++
++    Args:
++        cluster_soft (str): The server cluster software.
++        stderr (list[str]): The stderr got from submitting a job.
++
++    Returns:
++        bool: Whether the stderr reports a reached per-user job cap.
++    """
++    cluster_soft = cluster_soft.lower()
++    if cluster_soft == 'slurm':
++        return any('AssocMaxSubmitJobLimit' in err_line for err_line in stderr)
++    if cluster_soft == 'pbs':
++        return any('qsub: would exceed' in err_line or 'qsub: Maximum number of jobs' in err_line
++                   for err_line in stderr)
++    return False
++
++
+ def submit_job(path: str,
+                cluster_soft: str | None = None,
+                submit_cmd: str | None = None,
+                submit_filename: str | None = None,
+-               recursion: bool = False,
++               wait_on_cap: bool = True,
+                ) -> tuple[str | None, str | None]:
+     """
+     Submit a job.
++    If the scheduler refuses the submission because the per-user job cap is reached,
++    the submission is retried every ``SUBMISSION_CAP_WAIT_SECONDS`` until it is accepted,
++    unless ``wait_on_cap`` is ``False``, in which case the refusal is returned immediately
++    so that the caller can resize the submission (e.g., a smaller job array).
+ 
+     Args:
+         path (str): The job's folder path, where the submit script is located (just the folder path, w/o the filename).
+         cluster_soft (str, optional): The server cluster software.
+         submit_cmd (str, optional): The submit command.
+         submit_filename (str, optional): The submit script file name.
+-        recursion (bool, optional): Whether this call is within a recursion.
++        wait_on_cap (bool, optional): Whether to wait and retry when the per-user job cap is reached.
+ 
+     Returns:
+         tuple[str | None, str | None]: job_status, job_id
++            ``job_status`` is ``SUBMISSION_CAP_REACHED`` and ``job_id`` is ``None``
++            if the cap was reached and ``wait_on_cap`` is ``False``.
+     """
+     cluster_soft = cluster_soft or servers['local']['cluster_soft']
+     job_status, job_id = '', ''
+@@ -246,36 +274,30 @@ def submit_job(path: str,
+     submit_filename = submit_filename or submit_filenames[cluster_soft]
+     cmd = f'cd "{path}"; {submit_cmd} {submit_filename}'
+     stdout, stderr = execute_command(cmd)
+-    if not len(stdout):
++    if not len(stdout) and not _submission_cap_reached(cluster_soft, stderr):
+         time.sleep(10)
+         stdout, stderr = execute_command(cmd)
++    if not wait_on_cap and stderr and _submission_cap_reached(cluster_soft, stderr):
++        logger.warning(f'The scheduler refused the submission because of the per-user job cap:\n{stderr}')
++        return SUBMISSION_CAP_REACHED, None
++    waited = False
++    while stderr and _submission_cap_reached(cluster_soft, stderr):
++        logger.warning(f'Max number of submitted jobs was reached, sleeping {SUBMISSION_CAP_WAIT_SECONDS} s '
++                       f'before retrying the submission...')
++        time.sleep(SUBMISSION_CAP_WAIT_SECONDS)
++        waited = True
++        stdout, stderr = execute_command(cmd)
++    if waited and len(stdout):
++        logger.info('The job was submitted after waiting for the per-user job cap to clear.')
+     if stderr:
+-        if cluster_soft.lower() == 'slurm' and any('AssocMaxSubmitJobLimit' in err_line for err_line in stderr):
+-            logger.warning(f'Max number of submitted jobs was reached, sleeping...')
+-            time.sleep(5 * 60)
+-            submit_job(path=path,
+-                       cluster_soft=cluster_soft,
+-                       submit_cmd=submit_cmd,
+-                       submit_filename=submit_filename,
+-                       recursion=True,
+-                       )
+-        if cluster_soft.lower() == 'pbs' and  (any('qsub: would exceed' in err_line for err_line in stderr ) or any('qsub: Maximum number of jobs' in err_line for err_line in stderr)):
+-            logger.warning(f'Max number of submitted jobs was reached, sleeping...')
+-            time.sleep(5 * 60)
+-            submit_job(path=path,
+-                       cluster_soft=cluster_soft,
+-                       submit_cmd=submit_cmd,
+-                       submit_filename=submit_filename,
+-                       recursion=True,
+-                       )
+-        elif cluster_soft.lower() == 'pbs' and any('qsub: Illegal attribute or resource value' in err_line for err_line in stderr):
++        if cluster_soft.lower() == 'pbs' and any('qsub: Illegal attribute or resource value' in err_line for err_line in stderr):
+             raise ValueError(f'Got the following error when trying to submit job:\n{stderr}. Please check your submit script')
+         elif cluster_soft.lower() == 'pbs' and (
+                 any('Please do NOT submit jobs on compute nodes' in err_line for err_line in stderr)
+                 or any('Jobs should be submitted on login server' in err_line for err_line in stderr)
+         ):
+             raise ValueError('PBS job submission attempted from a compute node. Submit jobs from the login server.')
+-    if not len(stdout) or recursion:
++    if not len(stdout):
+         return None, None
+     if len(stderr) > 0 or len(stdout) == 0:
+         logger.warning(f'Got the following error when trying to submit job:\n{stderr}.')
+diff --git a/arc/job/local_test.py b/arc/job/local_test.py
+index 68d4bd496f..9be789de4f 100644
+--- a/arc/job/local_test.py
++++ b/arc/job/local_test.py
+@@ -107,6 +107,83 @@ def test_submit_job_pbs_compute_node_error(self):
+                     local.submit_job(path='.', cluster_soft='pbs', submit_cmd='qsub', submit_filename='submit.sh')
+         self.assertIn('compute node', str(cm.exception))
+ 
++    def _submit_with_cap(self, cluster_soft, cap_stderr, success_stdout, n_refusals):
++        """Submit through a scheduler that refuses ``n_refusals`` times, then accepts."""
++        responses = [([], list(cap_stderr))] * n_refusals + [(success_stdout, [])]
++        with patch('arc.job.local.execute_command', side_effect=responses) as mock_execute:
++            with patch('time.sleep', return_value=None) as mock_sleep:
++                result = local.submit_job(path='.', cluster_soft=cluster_soft, submit_cmd='sub',
++                                          submit_filename='submit.sh')
++        return result, mock_execute, mock_sleep
++
++    def test_submit_job_pbs_cap_retries_until_accepted(self):
++        """Test that a PBS per-user cap keeps retrying and then tracks the job that finally got submitted"""
++        for cap_line in ('qsub: would exceed queue generic per-user limit of 40 jobs',
++                         'qsub: Maximum number of jobs already in queue'):
++            with self.subTest(cap_line=cap_line):
++                result, mock_execute, mock_sleep = self._submit_with_cap(
++                    'pbs', [cap_line], ['12345.zeus'], n_refusals=3)
++                self.assertEqual(result, ('running', '12345'))
++                self.assertEqual(mock_execute.call_count, 4)
++                cap_sleeps = [call.args[0] for call in mock_sleep.call_args_list
++                              if call.args[0] == local.SUBMISSION_CAP_WAIT_SECONDS]
++                self.assertEqual(len(cap_sleeps), 3)
++
++    def test_submit_job_slurm_cap_retries_until_accepted(self):
++        """Test that a Slurm per-user cap keeps retrying and then tracks the job that finally got submitted"""
++        result, mock_execute, mock_sleep = self._submit_with_cap(
++            'slurm', ['sbatch: error: AssocMaxSubmitJobLimit'], ['Submitted batch job 777'], n_refusals=2)
++        self.assertEqual(result, ('running', '777'))
++        self.assertEqual(mock_execute.call_count, 3)
++        cap_sleeps = [call.args[0] for call in mock_sleep.call_args_list
++                      if call.args[0] == local.SUBMISSION_CAP_WAIT_SECONDS]
++        self.assertEqual(len(cap_sleeps), 2)
++
++    def test_submit_job_returns_the_cap_refusal_when_not_waiting(self):
++        """Test that wait_on_cap=False hands a per-user cap refusal back at once, for every scheduler"""
++        for cluster_soft, cap_line in (('pbs', "qsub: would exceed queue generic's per-user limit"),
++                                       ('slurm', 'sbatch: error: AssocMaxSubmitJobLimit')):
++            with self.subTest(cluster_soft=cluster_soft):
++                with patch('arc.job.local.execute_command', return_value=([], [cap_line])) as mock_execute, \
++                        patch('arc.job.local.time.sleep') as mock_sleep:
++                    result = local.submit_job(path='.', cluster_soft=cluster_soft, submit_cmd='sub',
++                                              submit_filename='submit.sh', wait_on_cap=False)
++                self.assertEqual(result, (local.SUBMISSION_CAP_REACHED, None))
++                self.assertEqual(mock_execute.call_count, 1)
++                mock_sleep.assert_not_called()
++
++    def test_submit_job_wait_on_cap_false_still_accepts_a_submission(self):
++        """Test that wait_on_cap=False does not change an accepted submission"""
++        with patch('arc.job.local.execute_command', return_value=(['999.zeus'], [])):
++            result = local.submit_job(path='.', cluster_soft='pbs', submit_cmd='qsub',
++                                      submit_filename='submit.sh', wait_on_cap=False)
++        self.assertEqual(result, ('running', '999'))
++
++    def test_submit_job_without_cap_does_not_wait(self):
++        """Test that an accepted submission neither waits for the cap nor retries"""
++        result, mock_execute, mock_sleep = self._submit_with_cap('pbs', [], ['999.zeus'], n_refusals=0)
++        self.assertEqual(result, ('running', '999'))
++        self.assertEqual(mock_execute.call_count, 1)
++        mock_sleep.assert_not_called()
++
++    def test_submit_job_pbs_illegal_attribute_error(self):
++        """Test that an illegal PBS attribute is still reported as an error"""
++        stderr = ['qsub: Illegal attribute or resource value']
++        with patch('arc.job.local.execute_command', return_value=(['x'], stderr)):
++            with self.assertRaises(ValueError) as cm:
++                local.submit_job(path='.', cluster_soft='pbs', submit_cmd='qsub', submit_filename='submit.sh')
++        self.assertIn('check your submit script', str(cm.exception))
++
++    def test_submit_job_empty_stdout_without_cap_returns_nothing(self):
++        """Test that an empty stdout without a cap error retries once after 10 s and then gives up"""
++        with patch('arc.job.local.execute_command', return_value=([], [])) as mock_execute:
++            with patch('time.sleep', return_value=None) as mock_sleep:
++                result = local.submit_job(path='.', cluster_soft='pbs', submit_cmd='qsub',
++                                          submit_filename='submit.sh')
++        self.assertEqual(result, (None, None))
++        self.assertEqual(mock_execute.call_count, 2)
++        mock_sleep.assert_called_once_with(10)
++
+     def test_check_running_jobs_ids_without_a_queueing_system(self):
+         """Test that a machine with no queueing system reports no queue job IDs"""
+         for cluster_soft in ['local', 'Local']:
+diff --git a/arc/job/pipe/pipe_coordinator.py b/arc/job/pipe/pipe_coordinator.py
+index 37e7cd2488..dd0f79a43e 100644
+--- a/arc/job/pipe/pipe_coordinator.py
++++ b/arc/job/pipe/pipe_coordinator.py
+@@ -24,7 +24,7 @@
+ )
+ from arc.job.pipe.pipe_state import (
+     TASK_FAMILY_TO_JOB_TYPE, PipeRunState, TaskState, TaskSpec,
+-    TaskStateRecord, read_task_state,
++    TaskStateRecord, read_task_state, update_task_state,
+ )
+ 
+ if TYPE_CHECKING:
+@@ -35,6 +35,7 @@
+ pipe_settings = settings['pipe_settings']
+ 
+ SPECIES_LEAF_FAMILIES = ('species_sp', 'species_freq')
++SUBMIT_FALLBACK_DELAY = 600
+ 
+ 
+ class PipedJobView:
+@@ -83,6 +84,8 @@ def __init__(self, sched: 'Scheduler'):
+         self.active_pipes: dict[str, PipeRun] = {}
+         self._pipe_poll_failures: dict[str, int] = {}
+         self._last_pipe_summary: dict[str, str] = {}
++        self._submit_failures: dict[str, tuple[int, float]] = {}
++        self._handed_tasks: dict[str, set[str]] = {}
+ 
+     def should_use_pipe(self, tasks: list[TaskSpec]) -> bool:
+         """
+@@ -251,7 +254,7 @@ def submit_pipe_run(self, run_id: str, tasks: list[TaskSpec],
+             tasks=tasks,
+             cluster_software=cluster_software,
+             max_workers=pipe_settings.get('max_workers', 100),
+-            max_attempts=pipe_settings.get('max_attempts', 3),
++            max_attempts=max(1, pipe_settings.get('max_attempts', 3)),
+             pipe_root=pipe_root,
+         )
+         pipe.stage()
+@@ -262,23 +265,91 @@ def submit_pipe_run(self, run_id: str, tasks: list[TaskSpec],
+                            f'for {cluster_software}. Tasks are staged but must be submitted manually.')
+             self.active_pipes[pipe.pipe_root] = pipe
+             return pipe
++        self.active_pipes[pipe.pipe_root] = pipe
++        self._submit(pipe)
++        return pipe
++
++    def _submit(self, pipe: PipeRun) -> bool:
++        """
++        Submit a pipe run's job array and record the job. A failure counts towards handing
++        the run to the Scheduler only while the run has no scheduler job.
++
++        Returns:
++            bool: Whether the job was submitted.
++        """
++        submitted = False
+         try:
+             job_status, job_id = pipe.submit_to_scheduler()
+             if job_id and job_status in ('submitted', 'running'):
+                 pipe.scheduler_job_id = job_id
+                 pipe.status = PipeRunState.SUBMITTED
+                 pipe.submitted_at = time.time()
+-                pipe._save_run_metadata()
+                 self.sched.server_job_ids.append(job_id)
+-                logger.info(f'Pipe run {run_id} submitted as job {job_id}.')
++                self._submit_failures.pop(pipe.pipe_root, None)
++                logger.info(f'Pipe run {pipe.run_id} submitted as job {job_id}.')
++                submitted = True
+             else:
+-                logger.warning(f'Pipe run {run_id}: submission returned status={job_status}. '
++                logger.warning(f'Pipe run {pipe.run_id}: submission returned status={job_status}. '
+                                f'Tasks are staged at {pipe.pipe_root}.')
+         except Exception as e:
+-            logger.warning(f'Pipe run {run_id}: submission failed ({e}). '
++            logger.warning(f'Pipe run {pipe.run_id}: submission failed ({e}). '
+                            f'Tasks are staged at {pipe.pipe_root} but not running.')
+-        self.active_pipes[pipe.pipe_root] = pipe
+-        return pipe
++        if submitted:
++            try:
++                pipe._save_run_metadata()
++            except Exception as e:
++                logger.warning(f'Pipe run {pipe.run_id}: submitted as job {pipe.scheduler_job_id}, '
++                               f'but its metadata could not be saved ({e}).')
++            return True
++        if pipe.scheduler_job_id is None:
++            count, first = self._submit_failures.get(pipe.pipe_root, (0, time.time()))
++            self._submit_failures[pipe.pipe_root] = (count + 1, first)
++        return False
++
++    def _hand_to_scheduler(self, pipe_key: str) -> None:
++        """
++        Hand the PENDING tasks of a run whose job array could not be submitted to the Scheduler
++        as individual jobs and mark each handed task CANCELLED. A task the Scheduler did not take
++        stays PENDING and the run is kept for another pass, up to ``2 * max_attempts`` passes,
++        after which the run is forgotten and marked FAILED. A task handed over is never handed
++        again, even if marking it CANCELLED failed.
++        """
++        pipe = self.active_pipes[pipe_key]
++        attempts = self._submit_failures[pipe_key][0]
++        handed = self._handed_tasks.setdefault(pipe_key, set())
++        pending = []
++        for spec in pipe.tasks:
++            if spec.task_id in handed:
++                continue
++            try:
++                state = read_task_state(pipe.pipe_root, spec.task_id)
++            except (FileNotFoundError, ValueError, KeyError):
++                logger.error(f'Pipe run {pipe.run_id}, task {spec.task_id}: could not read state, skipping.')
++                continue
++            if state.status == TaskState.PENDING.value:
++                pending.append((spec, state))
++        logger.error(f'Pipe run {pipe.run_id}: the job array was not submitted. '
++                     f'Handing {len(pending)} task(s) to the Scheduler as individual jobs.')
++        left = len(pending)
++        for spec, state in pending:
++            try:
++                if self._eject_to_scheduler(pipe, spec, state):
++                    handed.add(spec.task_id)
++                    left -= 1
++                    update_task_state(pipe.pipe_root, spec.task_id, TaskState.CANCELLED, ended_at=time.time())
++            except Exception as e:
++                logger.error(f'Pipe run {pipe.run_id}, task {spec.task_id}: hand-off to the Scheduler failed: {e}')
++        attempts += 1
++        max_attempts = max(1, pipe_settings.get('max_attempts', 3))
++        if left and attempts < 3 * max_attempts:
++            self._submit_failures[pipe_key] = (attempts, self._submit_failures[pipe_key][1])
++            return
++        self._forget_pipe(pipe_key)
++        try:
++            pipe.status = PipeRunState.FAILED
++            pipe._save_run_metadata()
++        except Exception as e:
++            logger.debug(f'Pipe run {pipe.run_id}: best-effort FAILED persist failed: {e}')
+ 
+     def register_pipe_run_from_dir(self, pipe_root: str) -> PipeRun:
+         """Reconstruct and register an existing pipe run from disk."""
+@@ -299,6 +370,17 @@ def poll_pipes(self) -> None:
+         max_consecutive_failures = 3
+         for pipe_key in list(self.active_pipes.keys()):
+             pipe = self.active_pipes[pipe_key]
++            if pipe_key in self._submit_failures:
++                attempts, first_failure = self._submit_failures[pipe_key]
++                max_attempts = max(1, pipe_settings.get('max_attempts', 3))
++                elapsed = time.time() - first_failure
++                if elapsed < attempts * SUBMIT_FALLBACK_DELAY / max_attempts:
++                    continue
++                if attempts >= max_attempts:
++                    self._hand_to_scheduler(pipe_key)
++                    continue
++                if not self._submit(pipe):
++                    continue
+             run_id = pipe.run_id
+             try:
+                 counts = pipe.reconcile()
+@@ -324,20 +406,7 @@ def poll_pipes(self) -> None:
+                 self._last_pipe_summary[pipe_key] = summary
+             if pipe.needs_resubmission:
+                 logger.info(f'Pipe run {run_id}: resubmitting to pick up retried tasks.')
+-                try:
+-                    job_status, job_id = pipe.submit_to_scheduler()
+-                    if job_id and job_status in ('submitted', 'running'):
+-                        pipe.scheduler_job_id = job_id
+-                        pipe.status = PipeRunState.SUBMITTED
+-                        pipe.submitted_at = time.time()
+-                        pipe._needs_resubmission = False
+-                        pipe._save_run_metadata()
+-                        self.sched.server_job_ids.append(job_id)
+-                        logger.info(f'Pipe run {run_id}: resubmitted as job {job_id}.')
+-                    else:
+-                        pipe._needs_resubmission = False
+-                except Exception:
+-                    logger.warning(f'Pipe run {run_id}: resubmission failed.', exc_info=True)
++                self._submit(pipe)
+             if pipe.status in (PipeRunState.COMPLETED, PipeRunState.COMPLETED_PARTIAL):
+                 self.ingest_pipe_results(pipe)
+                 self._forget_pipe(pipe_key)
+@@ -356,6 +425,8 @@ def _forget_pipe(self, pipe_key: str) -> None:
+             pipe_key: The run's key in ``active_pipes`` (its ``pipe_root``).
+         """
+         del self.active_pipes[pipe_key]
++        self._submit_failures.pop(pipe_key, None)
++        self._handed_tasks.pop(pipe_key, None)
+         self._pipe_poll_failures.pop(pipe_key, None)
+         self._last_pipe_summary.pop(pipe_key, None)
+ 
+@@ -542,18 +613,22 @@ def _post_ingest_conf_sp(self, label: str) -> None:
+                 self.sched.run_composite_job(label)
+ 
+     def _eject_to_scheduler(self, pipe: 'PipeRun', spec: TaskSpec,
+-                            state: 'TaskStateRecord') -> None:
++                            state: 'TaskStateRecord') -> bool:
+         """
+         Eject a failed pipe task to the Scheduler as an individual job.
+ 
+         Translates the TaskSpec back into a ``Scheduler.run_job()`` call so that
+         the Scheduler's existing ``troubleshoot_ess()`` pipeline handles it.
++
++        Returns:
++            bool: Whether the Scheduler owns the task, i.e. ``run_job()`` returned or the job
++                  was registered in ``running_jobs`` before it raised.
+         """
+         label = spec.owner_key
+         if label not in self.sched.species_dict:
+             logger.warning(f'Pipe run {pipe.run_id}, task {spec.task_id}: '
+                            f'species "{label}" not in species_dict, cannot eject.')
+-            return
++            return False
+         # Map task_family to the Scheduler's job_type. Note: ts_opt pipe tasks
+         # are TS conformer optimizations (at the guess level), not proper-level
+         # optimizations. The Scheduler uses 'conf_opt' for these, not 'opt'.
+@@ -570,7 +645,7 @@ def _eject_to_scheduler(self, pipe: 'PipeRun', spec: TaskSpec,
+         if job_type is None:
+             logger.warning(f'Pipe run {pipe.run_id}, task {spec.task_id}: '
+                            f'unknown task_family "{spec.task_family}", cannot eject.')
+-            return
++            return False
+         payload = spec.input_payload or {}
+         meta = spec.ingestion_metadata or {}
+         kwargs = {
+@@ -586,6 +661,7 @@ def _eject_to_scheduler(self, pipe: 'PipeRun', spec: TaskSpec,
+         elif spec.task_family == 'rotor_scan_1d':
+             kwargs['rotor_index'] = meta.get('rotor_index')
+             kwargs['torsions'] = payload.get('torsions')
++        owned = len(self.sched.running_jobs.get(label, []))
+         try:
+             logger.info(f'Pipe run {pipe.run_id}, task {spec.task_id}: '
+                         f'ejecting to Scheduler as individual {job_type} job for {label}.')
+@@ -593,3 +669,5 @@ def _eject_to_scheduler(self, pipe: 'PipeRun', spec: TaskSpec,
+         except Exception:
+             logger.error(f'Pipe run {pipe.run_id}, task {spec.task_id}: '
+                          f'failed to eject to Scheduler.', exc_info=True)
++            return len(self.sched.running_jobs.get(label, [])) > owned
++        return True
+diff --git a/arc/job/pipe/pipe_coordinator_test.py b/arc/job/pipe/pipe_coordinator_test.py
+index a170a4f392..17627dc75c 100644
+--- a/arc/job/pipe/pipe_coordinator_test.py
++++ b/arc/job/pipe/pipe_coordinator_test.py
+@@ -12,14 +12,15 @@
+ import tempfile
+ import time
+ import unittest
+-from unittest.mock import MagicMock, patch
++from unittest.mock import MagicMock, PropertyMock, patch
+ 
+-from arc.job.pipe.pipe_coordinator import PipeCoordinator
++from arc.job.pipe.pipe_coordinator import SUBMIT_FALLBACK_DELAY, PipeCoordinator
+ from arc.job.pipe.pipe_run import PipeRun, get_task_attempt_dir
+ from arc.job.pipe.pipe_state import (
+     PipeRunState,
+     TaskState,
+     TaskSpec,
++    read_task_state,
+     update_task_state,
+ )
+ from arc.level import Level
+@@ -287,6 +288,9 @@ class TestPollPipes(unittest.TestCase):
+ 
+     def setUp(self):
+         self.tmpdir = tempfile.mkdtemp(prefix='pipe_coord_poll_')
++        submit = patch.object(PipeRun, 'submit_to_scheduler', return_value=('submitted', '4242[]'))
++        submit.start()
++        self.addCleanup(submit.stop)
+         self.coord = PipeCoordinator(_make_mock_sched(self.tmpdir))
+ 
+     def tearDown(self):
+@@ -383,6 +387,203 @@ def fake_reconcile():
+         self.assertIn('77777[]', self.coord.sched.server_job_ids)
+ 
+ 
++class TestUnsubmittedPipeRun(unittest.TestCase):
++    """Tests for the retry and Scheduler fallback of a pipe run whose job array was never submitted."""
++
++    def setUp(self):
++        self.tmpdir = tempfile.mkdtemp(prefix='pipe_coord_unsubmitted_')
++        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
++        self.coord = PipeCoordinator(_make_mock_sched(self.tmpdir))
++        settings_patch = patch.dict('arc.job.pipe.pipe_coordinator.pipe_settings', {'max_attempts': 3})
++        settings_patch.start()
++        self.addCleanup(settings_patch.stop)
++
++    def _age(self, pipe_key, seconds):
++        """Make the first failed submission older by ``seconds``."""
++        count, first = self.coord._submit_failures[pipe_key]
++        self.coord._submit_failures[pipe_key] = (count, first - seconds)
++
++    def test_resubmission_succeeds_on_a_later_poll(self):
++        with patch.object(PipeRun, 'submit_to_scheduler', return_value=('errored', None)):
++            pipe = self.coord.submit_pipe_run('run_late', [_make_spec('t_late')])
++        self.assertEqual(pipe.status, PipeRunState.STAGED)
++        self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY / 3 + 1)
++        with patch.object(PipeRun, 'submit_to_scheduler', return_value=('submitted', '555[]')):
++            self.coord.poll_pipes()
++        self.assertEqual(pipe.scheduler_job_id, '555[]')
++        self.assertEqual(pipe.status, PipeRunState.RECONCILING)
++        self.assertIn('555[]', self.coord.sched.server_job_ids)
++        self.assertNotIn(pipe.pipe_root, self.coord._submit_failures)
++        self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++
++    def test_pending_tasks_go_to_the_scheduler_after_repeated_failures(self):
++        specs = [_make_spec('t_a'), _make_spec('t_b', conformer_index=1)]
++        with patch.object(PipeRun, 'submit_to_scheduler', side_effect=RuntimeError('qsub unreachable')):
++            pipe = self.coord.submit_pipe_run('run_never', specs)
++            for _ in range(2):
++                self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY / 3 + 1)
++                self.coord.poll_pipes()
++            self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++            self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY)
++            with self.assertLogs('arc', level='ERROR') as logs:
++                self.coord.poll_pipes()
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++        self.assertNotIn(pipe.pipe_root, self.coord._submit_failures)
++        calls = self.coord.sched.run_job.call_args_list
++        self.assertEqual([c.kwargs['conformer'] for c in calls], [0, 1])
++        for call in calls:
++            self.assertEqual(call.kwargs['job_type'], 'conf_opt')
++            self.assertEqual(call.kwargs['label'], 'H2O')
++            self.assertEqual(call.kwargs['level_of_theory'], {'method': 'mock', 'basis': 'mock'})
++        self.assertEqual(PipeRun.from_dir(pipe.pipe_root).status, PipeRunState.FAILED)
++        self.assertIn('run_never', logs.output[0])
++        self.assertIn('individual jobs', logs.output[0])
++
++    def _drive_to_hand_off(self, pipe):
++        """Fail the submissions until the next poll hands the run to the Scheduler."""
++        for _ in range(2):
++            self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY / 3 + 1)
++            self.coord.poll_pipes()
++        self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY)
++        self.coord.poll_pipes()
++
++    def test_a_task_the_scheduler_did_not_take_is_retried_alone(self):
++        specs = [_make_spec('t_a'), _make_spec('t_b', conformer_index=1)]
++        self.coord.sched.running_jobs = dict()
++        self.coord.sched.run_job.side_effect = [OSError('submit failed'), None, None]
++        with patch.object(PipeRun, 'submit_to_scheduler', side_effect=RuntimeError('qsub unreachable')):
++            pipe = self.coord.submit_pipe_run('run_retry', specs)
++            self._drive_to_hand_off(pipe)
++            self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++            self.assertEqual(read_task_state(pipe.pipe_root, 't_a').status, TaskState.PENDING.value)
++            self.assertEqual(read_task_state(pipe.pipe_root, 't_b').status, TaskState.CANCELLED.value)
++            self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY * 2)
++            self.coord.poll_pipes()
++        self.assertEqual(self.coord.sched.run_job.call_count, 3)
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++        self.assertEqual(read_task_state(pipe.pipe_root, 't_a').status, TaskState.CANCELLED.value)
++
++    def test_a_job_registered_before_run_job_raised_is_not_retried(self):
++        def register_then_raise(**kwargs):
++            self.coord.sched.running_jobs.setdefault(kwargs['label'], []).append('conf_opt_0')
++            raise OSError('execute failed')
++        self.coord.sched.running_jobs = dict()
++        self.coord.sched.run_job.side_effect = register_then_raise
++        with patch.object(PipeRun, 'submit_to_scheduler', side_effect=RuntimeError('qsub unreachable')):
++            pipe = self.coord.submit_pipe_run('run_owned', [_make_spec('t_a')])
++            self._drive_to_hand_off(pipe)
++        self.assertEqual(self.coord.sched.run_job.call_count, 1)
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++
++    def test_a_failed_cancel_write_does_not_hand_the_task_over_twice(self):
++        self.coord.sched.running_jobs = dict()
++        self.coord.sched.run_job.side_effect = [None, OSError('submit failed'), None]
++        specs = [_make_spec('t_a'), _make_spec('t_b', conformer_index=1)]
++        with patch.object(PipeRun, 'submit_to_scheduler', side_effect=RuntimeError('qsub unreachable')):
++            pipe = self.coord.submit_pipe_run('run_cancel', specs)
++            with patch('arc.job.pipe.pipe_coordinator.update_task_state', side_effect=OSError('disk')):
++                self._drive_to_hand_off(pipe)
++                self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++                self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY * 2)
++                self.coord.poll_pipes()
++        self.assertEqual(self.coord.sched.run_job.call_count, 3)
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++
++    def test_hand_off_passes_are_bounded(self):
++        self.coord.sched.running_jobs = dict()
++        self.coord.sched.run_job.side_effect = OSError('submit failed')
++        with patch.object(PipeRun, 'submit_to_scheduler', side_effect=RuntimeError('qsub unreachable')):
++            pipe = self.coord.submit_pipe_run('run_bounded', [_make_spec('t_a')])
++            self._drive_to_hand_off(pipe)
++            for _ in range(5):
++                self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY * 20)
++                self.coord.poll_pipes()
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++        self.assertEqual(self.coord.sched.run_job.call_count, 6)
++        self.assertEqual(PipeRun.from_dir(pipe.pipe_root).status, PipeRunState.FAILED)
++
++    def test_attempts_are_spread_over_the_minimum_time(self):
++        with patch.object(PipeRun, 'submit_to_scheduler', side_effect=RuntimeError('down')) as submit:
++            pipe = self.coord.submit_pipe_run('run_wait', [_make_spec('t_wait')])
++            for _ in range(5):
++                self.coord.poll_pipes()
++            self.assertEqual(submit.call_count, 1)
++            for expected in (2, 3):
++                self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY / 3 + 1)
++                self.coord.poll_pipes()
++                self.assertEqual(submit.call_count, expected)
++            self.coord.poll_pipes()
++        self.assertEqual(submit.call_count, 3)
++        self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++        self.coord.sched.run_job.assert_not_called()
++        self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY)
++        self.coord.poll_pipes()
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++        self.assertEqual(self.coord.sched.run_job.call_count, 1)
++
++    def test_a_single_attempt_means_one_submission(self):
++        with patch.dict('arc.job.pipe.pipe_coordinator.pipe_settings', {'max_attempts': 1}), \
++             patch.object(PipeRun, 'submit_to_scheduler', return_value=('errored', None)) as submit:
++            pipe = self.coord.submit_pipe_run('run_once', [_make_spec('t_once')])
++            self.coord.poll_pipes()
++            self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++            self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY)
++            self.coord.poll_pipes()
++        submit.assert_called_once()
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++        self.assertEqual(self.coord.sched.run_job.call_count, 1)
++
++    def test_zero_attempts_behaves_like_one(self):
++        with patch.dict('arc.job.pipe.pipe_coordinator.pipe_settings', {'max_attempts': 0}), \
++             patch.object(PipeRun, 'submit_to_scheduler', return_value=('errored', None)) as submit:
++            pipe = self.coord.submit_pipe_run('run_zero', [_make_spec('t_zero')])
++            self.coord.poll_pipes()
++            self._age(pipe.pipe_root, SUBMIT_FALLBACK_DELAY)
++            self.coord.poll_pipes()
++        submit.assert_called_once()
++        self.assertNotIn(pipe.pipe_root, self.coord.active_pipes)
++        self.assertEqual(self.coord.sched.run_job.call_count, 1)
++
++    def test_a_failed_resubmission_does_not_hand_the_run_to_the_scheduler(self):
++        with patch.object(PipeRun, 'submit_to_scheduler', return_value=('submitted', '9[]')):
++            pipe = self.coord.submit_pipe_run('run_resub', [_make_spec('t_resub')])
++        with patch.object(pipe, 'reconcile', return_value={TaskState.PENDING.value: 1}), \
++             patch.object(PipeRun, 'needs_resubmission', new_callable=PropertyMock, return_value=True), \
++             patch.object(PipeRun, 'submit_to_scheduler', return_value=('errored', None)):
++            for _ in range(4):
++                self.coord.poll_pipes()
++        self.assertNotIn(pipe.pipe_root, self.coord._submit_failures)
++        self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++        self.coord.sched.run_job.assert_not_called()
++
++    def test_a_metadata_write_error_after_submission_does_not_propagate(self):
++        def save(pipe):
++            if pipe.status == PipeRunState.SUBMITTED:
++                raise OSError('disk full')
++
++        with patch.object(PipeRun, 'submit_to_scheduler', return_value=('submitted', '1[]')) as submit, \
++             patch.object(PipeRun, '_save_run_metadata', autospec=True, side_effect=save):
++            with self.assertLogs('arc', level='WARNING') as logs:
++                pipe = self.coord.submit_pipe_run('run_disk', [_make_spec('t_disk')])
++            self.coord.poll_pipes()
++        self.assertIn('submitted as job 1[]', logs.output[0])
++        self.assertIn('metadata could not be saved', logs.output[0])
++        submit.assert_called_once()
++        self.assertEqual(pipe.scheduler_job_id, '1[]')
++        self.assertIn('1[]', self.coord.sched.server_job_ids)
++        self.assertNotIn(pipe.pipe_root, self.coord._submit_failures)
++        self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++
++    def test_a_run_with_a_job_id_is_not_resubmitted(self):
++        with patch.object(PipeRun, 'submit_to_scheduler', return_value=('submitted', '777[]')) as submit:
++            pipe = self.coord.submit_pipe_run('run_live', [_make_spec('t_live')])
++            for _ in range(4):
++                self.coord.poll_pipes()
++        submit.assert_called_once()
++        self.assertIn(pipe.pipe_root, self.coord.active_pipes)
++        self.coord.sched.run_job.assert_not_called()
++
++
+ class TestIngestPipeResults(unittest.TestCase):
+     """Tests for PipeCoordinator.ingest_pipe_results()."""
+ 
+diff --git a/arc/job/pipe/pipe_run.py b/arc/job/pipe/pipe_run.py
+index 43e0d3c05b..9e06193c76 100644
+--- a/arc/job/pipe/pipe_run.py
++++ b/arc/job/pipe/pipe_run.py
+@@ -28,6 +28,9 @@
+ from arc.common import get_logger
+ from arc.imports import pipe_submit, settings
+ 
++from arc.job.local import SUBMISSION_CAP_REACHED
++from arc.job.pipe.queue_limit import discover_job_allowance, next_array_size
++from arc.job.ssh import SUBMISSION_CAP_WAIT_SECONDS
+ from arc.job.pipe.pipe_state import (
+     PipeRunState,
+     TaskState,
+@@ -57,6 +60,10 @@ class PipeRun:
+         tasks (list[TaskSpec]): Task specifications to execute.
+         cluster_software (str): Cluster scheduler type.
+         max_workers (int): Maximum number of concurrent array workers.
++        array_size (int, optional): The number of array workers the run was last submitted with, which is
++                                    smaller than the number of tasks when the queue's per-user job limit
++                                    forced a smaller array. Workers claim tasks until none remain, so a
++                                    smaller array still completes every task.
+         max_attempts (int): Maximum retry attempts per task.
+     """
+ 
+@@ -68,12 +75,14 @@ def __init__(self,
+                  max_workers: int = 100,
+                  max_attempts: int = 3,
+                  pipe_root: str | None = None,
++                 array_size: int | None = None,
+                  ):
+         self.project_directory = project_directory
+         self.run_id = run_id
+         self.tasks = tasks
+         self.cluster_software = cluster_software
+         self.max_workers = max_workers
++        self.array_size = array_size
+         self.max_attempts = max_attempts
+         self.pipe_root = pipe_root if pipe_root is not None \
+             else os.path.join(project_directory, 'calcs', 'pipe_' + run_id)
+@@ -108,6 +117,7 @@ def _save_run_metadata(self) -> None:
+             'status': self.status.value,
+             'cluster_software': self.cluster_software,
+             'max_workers': self.max_workers,
++            'array_size': self.array_size,
+             'max_attempts': self.max_attempts,
+             'task_family': task_family,
+             'engine': engine,
+@@ -153,6 +163,7 @@ def from_dir(cls, pipe_root: str) -> PipeRun:
+             max_workers=data.get('max_workers', 100),
+             max_attempts=data.get('max_attempts', 3),
+             pipe_root=pipe_root,
++            array_size=data.get('array_size'),
+         )
+         run.status = PipeRunState(data['status'])
+         run.created_at = data.get('created_at', 0)
+@@ -192,6 +203,15 @@ def stage(self) -> None:
+         self.status = PipeRunState.STAGED
+         self._save_run_metadata()
+ 
++    def _natural_array_size(self) -> int:
++        """
++        The array size the tasks call for, before any queue limit is considered.
++
++        Returns:
++            int: One worker per task, at most ``max_workers``.
++        """
++        return min(self.max_workers, len(self.tasks)) if self.tasks else self.max_workers
++
+     def _submission_resources(self):
+         """
+         Derive resource settings from the homogeneous task list.
+@@ -201,7 +221,7 @@ def _submission_resources(self):
+         """
+         cpus = self.tasks[0].required_cores if self.tasks else 1
+         memory_mb = self.tasks[0].required_memory_mb if self.tasks else 4096
+-        array_size = min(self.max_workers, len(self.tasks)) if self.tasks else self.max_workers
++        array_size = self.array_size if self.array_size is not None else self._natural_array_size()
+         if self.cluster_software == 'local':
+             # Cap each worker's cores at the local CPU budget so a single worker cannot exceed it
+             # (the submit script exports these as OMP/MKL/OPENBLAS_NUM_THREADS and ARC_PIPE_LOCAL_CPUS),
+@@ -318,12 +338,49 @@ def submit_to_scheduler(self):
+             return 'errored', None
+         from arc.job.local import submit_job as local_submit_job
+         filename = 'submit.sub' if self.cluster_software == 'htcondor' else 'submit.sh'
+-        job_status, job_id = local_submit_job(
+-            path=self.pipe_root,
+-            cluster_soft=canonical_cs,
+-            submit_filename=filename,
+-        )
+-        return job_status, job_id
++        size = self._initial_array_size(canonical_cs)
++        while True:
++            self.array_size = size
++            self.write_submit_script()
++            job_status, job_id = local_submit_job(
++                path=self.pipe_root,
++                cluster_soft=canonical_cs,
++                submit_filename=filename,
++                wait_on_cap=False,
++            )
++            if job_status != SUBMISSION_CAP_REACHED:
++                return job_status, job_id
++            if size > 1:
++                size = next_array_size(size)
++                logger.warning(f'Pipe run {self.run_id}: the queue refused the job array, '
++                               f'retrying with {size} workers for {len(self.tasks)} tasks.')
++                continue
++            logger.warning(f'Pipe run {self.run_id}: even a 1-worker job array was refused because of the per-user '
++                           f'job cap. Waiting {SUBMISSION_CAP_WAIT_SECONDS} s for the queue to free up.')
++            time.sleep(SUBMISSION_CAP_WAIT_SECONDS)
++            size = self._initial_array_size(canonical_cs)
++
++    def _initial_array_size(self, canonical_cs: str) -> int:
++        """
++        The array size to try first: what the tasks call for, limited by the job allowance the
++        scheduler reports for the user in the queue, if it reports one.
++
++        Args:
++            canonical_cs (str): The cluster software as spelled in ``settings['submit_command']``.
++
++        Returns:
++            int: The array size, at least 1.
++        """
++        size = self._natural_array_size()
++        queue, _ = next(iter(servers_dict.get('local', dict()).get('queues', dict()).items()), ('', None))
++        allowance = discover_job_allowance(cluster_software=canonical_cs,
++                                           queue=queue,
++                                           limit_override=pipe_settings.get('max_queued_jobs'))
++        if allowance is not None and allowance < size:
++            logger.info(f'Pipe run {self.run_id}: limiting the job array to {max(allowance, 1)} workers '
++                        f'for {len(self.tasks)} tasks, the per-user job allowance in queue "{queue}".')
++            size = max(allowance, 1)
++        return size
+ 
+     def submit_locally(self):
+         """
+diff --git a/arc/job/pipe/pipe_run_test.py b/arc/job/pipe/pipe_run_test.py
+index d7eb24ab4a..c892eb7827 100644
+--- a/arc/job/pipe/pipe_run_test.py
++++ b/arc/job/pipe/pipe_run_test.py
+@@ -7,13 +7,17 @@
+ 
+ import json
+ import os
++import re
+ import shutil
++import sys
+ import tempfile
+ import time
+ import unittest
+ from unittest import mock
+ 
++import arc.job.local as local_module
+ import arc.job.pipe.pipe_run as pipe_run_module
++from arc.job.ssh import SUBMISSION_CAP_WAIT_SECONDS
+ from arc.job.adapters.mockter import MockAdapter
+ from arc.job.pipe.pipe_state import (TaskState, TaskStateRecord, PipeRunState, TaskSpec, get_task_attempt_dir,
+                                      read_task_state, update_task_state)
+@@ -332,6 +336,124 @@ def test_local_scratch_falls_back_to_run_id_when_project_moved(self):
+         self.assertNotIn('..', preamble)
+ 
+ 
++class TestPipeRunQueueLimit(unittest.TestCase):
++    """Tests that a pipe array shrinks to fit the per-user job limit of the queue."""
++
++    CAP_LINE = "qsub: would exceed queue generic's per-user limit"
++
++    def setUp(self):
++        self.tmpdir = tempfile.mkdtemp(prefix='pipe_run_queue_limit_')
++        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
++        self.sizes_tried = list()
++        self.wait_on_cap_args = list()
++        self.sleeps = list()
++        self.free = None
++        self.allowance = None
++        for patcher in (mock.patch('arc.job.local.submit_job', side_effect=self._fake_submit_job),
++                        mock.patch.object(pipe_run_module, 'discover_job_allowance',
++                                          side_effect=lambda **kwargs: self.allowance),
++                        mock.patch.object(pipe_run_module.time, 'sleep', side_effect=self.sleeps.append),
++                        mock.patch.dict(pipe_run_module.settings['submit_command'], {'PBS': sys.executable}),
++                        mock.patch.dict(pipe_run_module.pipe_settings, {'max_queued_jobs': None})):
++            patcher.start()
++            self.addCleanup(patcher.stop)
++
++    def _fake_submit_job(self, path, cluster_soft=None, submit_filename=None, wait_on_cap=True, **kwargs):
++        """A scheduler that refuses a PBS array larger than the free slots, as Zeus does."""
++        with open(os.path.join(path, submit_filename)) as f:
++            size = int(re.search(r'#PBS -J 1-(\d+)', f.read()).group(1))
++        self.sizes_tried.append(size)
++        self.wait_on_cap_args.append(wait_on_cap)
++        free = self.free() if callable(self.free) else self.free
++        if free is not None and size > free:
++            return local_module.SUBMISSION_CAP_REACHED, None
++        return 'running', f'{1000 + len(self.sizes_tried)}[].zeus'
++
++    def _make_run(self, n_tasks=80, max_workers=100):
++        run = PipeRun(project_directory=self.tmpdir, run_id='qlimit', tasks=[_make_spec(f't_{i}') for i in range(n_tasks)],
++                      cluster_software='pbs', max_workers=max_workers)
++        run.stage()
++        return run
++
++    def test_array_larger_than_the_limit_shrinks_without_waiting(self):
++        self.free = 40
++        run = self._make_run()
++        status, job_id = run.submit_to_scheduler()
++        self.assertEqual(status, 'running')
++        self.assertEqual(self.sizes_tried, [80, 40])
++        self.assertEqual(self.wait_on_cap_args, [False, False])
++        self.assertEqual(run.array_size, 40)
++        self.assertEqual(self.sleeps, list())
++        with open(os.path.join(run.pipe_root, 'submit.sh')) as f:
++            self.assertIn('#PBS -J 1-40', f.read())
++
++    def test_array_is_not_larger_than_the_tasks(self):
++        run = self._make_run(n_tasks=7)
++        run.submit_to_scheduler()
++        self.assertEqual(self.sizes_tried, [7])
++
++    def test_partially_free_allowance_admits_a_smaller_array(self):
++        self.free = 12
++        run = self._make_run()
++        run.submit_to_scheduler()
++        self.assertEqual(self.sizes_tried, [80, 40, 20, 10])
++        self.assertEqual(self.sleeps, list())
++
++    def test_temporarily_full_queue_waits_instead_of_settling_for_one_worker(self):
++        free_slots = iter([0, 0, 0, 0, 0, 0, 0, 0, 40])
++        self.free = lambda: next(free_slots)
++        run = self._make_run()
++        status, _ = run.submit_to_scheduler()
++        self.assertEqual(status, 'running')
++        self.assertEqual(self.sizes_tried, [80, 40, 20, 10, 5, 2, 1, 80, 40])
++        self.assertEqual(self.sleeps, [SUBMISSION_CAP_WAIT_SECONDS])
++        self.assertEqual(run.array_size, 40)
++
++    def test_discovered_allowance_sizes_the_first_attempt(self):
++        self.allowance = 34
++        self.free = 40
++        run = self._make_run()
++        run.submit_to_scheduler()
++        self.assertEqual(self.sizes_tried, [34])
++
++    def test_no_allowance_left_waits_with_a_single_worker_array(self):
++        self.allowance = 0
++        free_slots = iter([0, 5])
++        self.free = lambda: next(free_slots)
++        run = self._make_run()
++        run.submit_to_scheduler()
++        self.assertEqual(self.sizes_tried, [1, 1])
++        self.assertEqual(self.sleeps, [SUBMISSION_CAP_WAIT_SECONDS])
++
++    def test_override_setting_is_passed_to_the_discovery(self):
++        run = self._make_run(n_tasks=3)
++        with mock.patch.dict(pipe_run_module.pipe_settings, {'max_queued_jobs': 25}), \
++                mock.patch.object(pipe_run_module, 'discover_job_allowance', return_value=None) as discover:
++            run.submit_to_scheduler()
++        self.assertEqual(discover.call_args.kwargs['limit_override'], 25)
++        self.assertEqual(discover.call_args.kwargs['cluster_software'], 'PBS')
++
++    def test_non_cap_failure_is_returned_without_shrinking(self):
++        run = self._make_run()
++        with mock.patch('arc.job.local.submit_job', return_value=(None, None)) as submit:
++            self.assertEqual(run.submit_to_scheduler(), (None, None))
++        self.assertEqual(submit.call_count, 1)
++
++    def test_array_size_survives_a_restart_from_disk(self):
++        self.free = 40
++        run = self._make_run()
++        run.submit_to_scheduler()
++        run._save_run_metadata()
++        self.assertEqual(PipeRun.from_dir(run.pipe_root).array_size, 40)
++
++    def test_fewer_workers_than_tasks_still_counts_every_task(self):
++        self.free = 4
++        run = self._make_run(n_tasks=10)
++        run.submit_to_scheduler()
++        self.assertEqual(run.array_size, 2)
++        self.assertEqual(run._count_task_states().get('PENDING', 0), 10)
++
++
+ class TestPipeRunReconcile(unittest.TestCase):
+ 
+     def setUp(self):
+diff --git a/arc/job/pipe/queue_limit.py b/arc/job/pipe/queue_limit.py
+new file mode 100644
+index 0000000000..7c38447385
+--- /dev/null
++++ b/arc/job/pipe/queue_limit.py
+@@ -0,0 +1,229 @@
++"""
++Sizing a pipe job array against the per-user job limit of the queue.
++
++A pipe run submits one job array whose subjobs are workers, and every array subjob counts
++against the per-user queue limit that the scheduler judges when the array is submitted. The
++limit is rarely known to the user, so it is read from the scheduler when possible
++(:func:`discover_job_allowance`), and :func:`next_array_size` shrinks the array when the scheduler
++refuses it regardless. Every discovery failure yields ``None`` (unknown), never an exception.
++"""
++
++import getpass
++import os
++import re
++
++from arc.common import get_logger
++from arc.imports import settings
++from arc.job.local import execute_command
++
++
++logger = get_logger()
++
++PBS_LIMIT_ENTRY = re.compile(r'\[([ugpo]):([^=\]\s]+)=(\d+)\]')
++PBS_GENERIC_USER = 'PBS_GENERIC'
++PBS_JOB_ID = re.compile(r'^(\d+)(\[\d*\])?\.')
++PBS_INACTIVE_STATES = ('F', 'X')
++
++
++def next_array_size(size: int) -> int:
++    """
++    The array size to try after the scheduler refused ``size`` workers.
++
++    Args:
++        size (int): The refused array size.
++
++    Returns:
++        int: Half of ``size``, but at least 1.
++    """
++    return max(1, size // 2)
++
++
++def parse_pbs_per_user_limit(text: str, user: str) -> int | None:
++    """
++    Parse the per-user ``max_queued`` limit from the output of ``qstat -Qf <queue>`` or ``qstat -Bf``.
++
++    A limit set for the user by name wins over the generic one (``PBS_GENERIC``). Limits on
++    groups, projects, or the whole queue/server are not per-user limits and are ignored, as are
++    resource limits such as ``max_queued_res.ncpus``.
++
++    Args:
++        text (str): The ``qstat -Qf`` or ``qstat -Bf`` output.
++        user (str): The user name.
++
++    Returns:
++        int | None: The limit, or ``None`` if the text defines no per-user job-count limit.
++    """
++    generic, specific = None, None
++    for line in text.replace('\n\t', '').splitlines():
++        key, sep, value = line.partition('=')
++        if not sep or key.strip() != 'max_queued':
++            continue
++        for kind, name, number in PBS_LIMIT_ENTRY.findall(value):
++            if kind != 'u':
++                continue
++            if name == user:
++                specific = int(number)
++            elif name == PBS_GENERIC_USER:
++                generic = int(number)
++    return specific if specific is not None else generic
++
++
++def parse_pbs_max_array_size(text: str) -> int | None:
++    """
++    Parse the largest allowed job array size (``max_array_size``) from ``qstat -Bf`` or ``qstat -Qf``.
++
++    Args:
++        text (str): The ``qstat -Bf`` or ``qstat -Qf`` output.
++
++    Returns:
++        int | None: The largest number of subjobs of an array, or ``None`` if not set.
++    """
++    match = re.search(r'^\s*max_array_size\s*=\s*(\d+)\s*$', text, re.MULTILINE)
++    return int(match.group(1)) if match else None
++
++
++def _pbs_queue_matches(listed: str, queue: str) -> bool:
++    """
++    Whether a queue column entry of ``qstat -u`` names ``queue``.
++
++    The default (narrow) output truncates a long name and marks it with ``*`` (``mafat_n*``);
++    such an entry matches every queue it is a prefix of, which can only overcount.
++    """
++    if listed.endswith('*'):
++        return queue.startswith(listed[:-1])
++    return listed == queue
++
++
++def count_pbs_user_jobs(stdout: list[str], queue: str) -> int:
++    """
++    Count the user's active jobs (queued, running, held, ...) in a queue from ``qstat -w -t -u <user>``.
++
++    Each listed subjob counts as one job. An array's parent row counts as one job only if none of
++    its subjobs is listed, as is the case for a queued array that has not started.
++
++    Args:
++        stdout (list[str]): The ``qstat -w -t -u <user>`` stdout lines (``-w`` avoids truncated names).
++        queue (str): The queue name.
++
++    Returns:
++        int: The number of active jobs in that queue.
++    """
++    count = 0
++    parents, parents_with_subjobs = set(), set()
++    for line in stdout:
++        tokens = line.split()
++        match = PBS_JOB_ID.match(tokens[0]) if tokens else None
++        if len(tokens) < 10 or match is None or not _pbs_queue_matches(tokens[2], queue) \
++                or tokens[-2] in PBS_INACTIVE_STATES:
++            continue
++        array_index = match.group(2)
++        if array_index == '[]':
++            parents.add(match.group(1))
++        else:
++            count += 1
++            if array_index is not None:
++                parents_with_subjobs.add(match.group(1))
++    return count + len(parents - parents_with_subjobs)
++
++
++def parse_slurm_max_submit_jobs(text: str) -> int | None:
++    """
++    Parse the per-user submit limit from ``sacctmgr -n -P show assoc user=<user> format=MaxSubmitJobs``.
++
++    Args:
++        text (str): The sacctmgr output, one association per line, empty if unlimited.
++
++    Returns:
++        int | None: The smallest positive limit, or ``None`` if there is none.
++    """
++    limits = [int(line.strip()) for line in text.splitlines() if line.strip().isdigit() and int(line.strip()) > 0]
++    return min(limits) if limits else None
++
++
++def parse_slurm_max_array_size(text: str) -> int | None:
++    """
++    Parse ``MaxArraySize`` from ``scontrol show config``.
++
++    Slurm accepts array indices below ``MaxArraySize``, so the largest array has ``MaxArraySize - 1`` tasks.
++
++    Args:
++        text (str): The ``scontrol show config`` output.
++
++    Returns:
++        int | None: The largest allowed number of array tasks, or ``None`` if not found.
++    """
++    match = re.search(r'^\s*MaxArraySize\s*=\s*(\d+)', text, re.MULTILINE)
++    return max(int(match.group(1)) - 1, 1) if match else None
++
++
++def _run(command: str) -> str:
++    """
++    Run a read-only scheduler query and return its stdout, or an empty string on any failure.
++    """
++    try:
++        stdout, _ = execute_command(command)
++    except Exception as e:
++        logger.debug(f'The scheduler query "{command}" failed: {e}')
++        return ''
++    return '\n'.join(stdout or list())
++
++
++def _command_in_dir_of(status_command: str, name: str) -> str:
++    """
++    A scheduler command ``name`` expected beside the configured status command.
++    """
++    binary = status_command.split()[0]
++    return os.path.join(os.path.dirname(binary), name) if os.path.dirname(binary) else name
++
++
++def discover_job_allowance(cluster_software: str,
++                           queue: str,
++                           limit_override: int | None = None,
++                           ) -> int | None:
++    """
++    How many more jobs the user may submit to a queue, as far as the scheduler says.
++
++    Args:
++        cluster_software (str): ``'pbs'`` or ``'slurm'``; any other scheduler is not queried.
++        queue (str): The queue (partition) name.
++        limit_override (int, optional): The per-user job limit, if the user states it
++                                        (``pipe_settings['max_queued_jobs']``), instead of reading it.
++
++    Returns:
++        int | None: The allowance (0 if the user is at the limit), or ``None`` if unknown.
++    """
++    software = cluster_software.lower()
++    status_commands = settings.get('check_status_command') or dict()
++    user = getpass.getuser()
++    if software == 'pbs':
++        status_command = status_commands.get('PBS')
++        if not status_command:
++            return None
++        qstat = status_command.split()[0]
++        server_text = _run(f'{qstat} -Bf')
++        limits = [limit_override] if limit_override else [
++            parse_pbs_per_user_limit(_run(f'{qstat} -Qf {queue}'), user),
++            parse_pbs_per_user_limit(server_text, user)]
++        limits = [limit for limit in limits if limit is not None]
++        max_array = parse_pbs_max_array_size(server_text)
++        allowances = [max_array] if max_array is not None else list()
++        if limits:
++            used = count_pbs_user_jobs(_run(f'{qstat} -w -t -u {user}').splitlines(), queue)
++            allowances.append(max(min(limits) - used, 0))
++        return min(allowances) if allowances else None
++    if software == 'slurm':
++        status_command = status_commands.get('Slurm')
++        if not status_command:
++            return None
++        limit = limit_override or parse_slurm_max_submit_jobs(
++            _run(f'{_command_in_dir_of(status_command, "sacctmgr")} -n -P show assoc user={user} format=MaxSubmitJobs'))
++        max_array = parse_slurm_max_array_size(_run(f'{_command_in_dir_of(status_command, "scontrol")} show config'))
++        allowances = list()
++        if limit is not None:
++            used = len([line for line in _run(f'{status_command.split()[0]} -h -r -u {user} -p {queue} -t PD,R '
++                                              f'-o %i').splitlines() if line.strip()])
++            allowances.append(max(limit - used, 0))
++        if max_array is not None:
++            allowances.append(max_array)
++        return min(allowances) if allowances else None
++    return None
+diff --git a/arc/job/pipe/queue_limit_test.py b/arc/job/pipe/queue_limit_test.py
+new file mode 100644
+index 0000000000..bf7ba0672a
+--- /dev/null
++++ b/arc/job/pipe/queue_limit_test.py
+@@ -0,0 +1,204 @@
++#!/usr/bin/env python3
++# encoding: utf-8
++
++"""
++This module contains unit tests for the arc.job.pipe.queue_limit module
++"""
++
++import unittest
++from unittest.mock import patch
++
++import arc.job.pipe.queue_limit as queue_limit
++
++
++PBS_QUEUE_FULL = """Queue: mafat_new_q
++    queue_type = Execution
++    total_jobs = 9
++    state_count = Transit:0 Queued:3 Held:0 Waiting:0 Running:6 Exiting:0 Begun:0
++    max_queued = [u:PBS_GENERIC=40]
++    max_queued_res.ncpus = [u:PBS_GENERIC=600]
++    acl_group_enable = True
++    acl_groups = amouyal_prj,arad_prj,
++	grinberg-dana_prj
++    enabled = True
++"""
++
++QSTAT_USER = [
++    '',
++    'zeus.technion.ac.il:                                                            Req\'d  Req\'d   Elap',
++    'Job ID                         Username Queue    Jobname    SessID NDS TSK Memory Time  S Time',
++    '------------------------------ -------- -------- ---------- ------ --- --- ------ ----- - -----',
++    '100.zeus                       alice    mafat_new_q ts0       1234   1   8   16gb 24:00 R 01:00',
++    '101[].zeus                     alice    mafat_new_q pipe_x      --   1   8   16gb   --  B   --',
++    '101[1].zeus                    alice    mafat_new_q pipe_x    4321   1   8   16gb   --  R 00:10',
++    '102.zeus                       alice    other_q  ts1       1234   1   8   16gb 24:00 R 01:00',
++    '103.zeus                       alice    mafat_new_q old       1234   1   8   16gb 24:00 F 01:00',
++]
++
++
++class TestPbsParsing(unittest.TestCase):
++
++    def test_generic_per_user_limit(self):
++        self.assertEqual(queue_limit.parse_pbs_per_user_limit(PBS_QUEUE_FULL, 'alice'), 40)
++
++    def test_limit_for_the_user_by_name_wins(self):
++        text = 'max_queued = [u:PBS_GENERIC=40]\n    max_queued = [u:alice=25]\n'
++        self.assertEqual(queue_limit.parse_pbs_per_user_limit(text, 'alice'), 25)
++        self.assertEqual(queue_limit.parse_pbs_per_user_limit(text, 'bob'), 40)
++
++    def test_several_entries_on_one_line(self):
++        text = '    max_queued = [u:PBS_GENERIC=40], [u:alice=60], [g:PBS_GENERIC=100]\n'
++        self.assertEqual(queue_limit.parse_pbs_per_user_limit(text, 'alice'), 60)
++
++    def test_non_user_and_resource_limits_are_ignored(self):
++        text = 'max_queued = [o:PBS_ALL=500]\n    max_queued = [g:PBS_GENERIC=100]\n    max_queued_res.ncpus = [u:PBS_GENERIC=600]\n'
++        self.assertIsNone(queue_limit.parse_pbs_per_user_limit(text, 'alice'))
++
++    def test_malformed_text_gives_none(self):
++        for text in ('', 'qstat: Unknown queue', 'max_queued = [u:PBS_GENERIC=forty]', 'max_queued = 40'):
++            with self.subTest(text=text):
++                self.assertIsNone(queue_limit.parse_pbs_per_user_limit(text, 'alice'))
++
++    def test_wrapped_value_is_joined(self):
++        text = '    max_queued = [u:PBS_GENERIC=\n\t40]\n'
++        self.assertEqual(queue_limit.parse_pbs_per_user_limit(text, 'alice'), 40)
++
++    def test_count_user_jobs_in_queue(self):
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_USER, 'mafat_new_q'), 2)
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_USER, 'other_q'), 1)
++        self.assertEqual(queue_limit.count_pbs_user_jobs(['garbage', '', 'a b c'], 'mafat_new_q'), 0)
++
++
++QSTAT_DEFAULT_TRUNCATED = """
++zeus-m.technion.ac.il:
++                                                            Req'd  Req'd   Elap
++Job ID          Username Queue    Jobname    SessID NDS TSK Memory Time  S Time
++--------------- -------- -------- ---------- ------ --- --- ------ ----- - -----
++4894486.zeus-m* calvin.p mafat_n* a1695      40407*   1  12   47gb 3600: R 09:46
++4894487.zeus-m* calvin.p alon_q   b1          40408    1  12   47gb 3600: R 09:46
++""".splitlines()
++
++QSTAT_WIDE = """
++zeus-m.technion.ac.il:
++                                                                                  Req'd  Req'd   Elap
++Job ID                  Username    Queue       Jobname          SessID  NDS   TSK Memory Time  S Time
++----------------------- ----------- ----------- ---------------- ------ ----- ----- ------ ----- - -----
++4894486.zeus-m.technion calvin.p    mafat_new_q a1695             40407     1    12   47gb 3600: R 09:46
++4894487.zeus-m.technion calvin.p    alon_q      b1               40408     1    12   47gb 3600: R 09:46
++4894500[].zeus-m.techni calvin.p    mafat_new_q pipe_ts_opt         --     1     8   16gb 3600: Q   --
++""".splitlines()
++
++
++class TestPbsUserJobCount(unittest.TestCase):
++
++    def test_default_truncated_output_still_counts_the_queue(self):
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_DEFAULT_TRUNCATED, 'mafat_new_q'), 1)
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_DEFAULT_TRUNCATED, 'alon_q'), 1)
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_DEFAULT_TRUNCATED, 'zeus_long_q'), 0)
++
++    def test_wide_output(self):
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_WIDE, 'mafat_new_q'), 2)
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_WIDE, 'alon_q'), 1)
++
++    def test_queued_array_parent_counts_once_and_started_subjobs_replace_it(self):
++        self.assertEqual(queue_limit.count_pbs_user_jobs(QSTAT_WIDE[:-1] + [QSTAT_WIDE[-1]], 'mafat_new_q'), 2)
++        started = [QSTAT_WIDE[-1]] + [QSTAT_WIDE[-1].replace('[]', f'[{i}]').replace(' Q ', ' R ') for i in range(1, 4)]
++        self.assertEqual(queue_limit.count_pbs_user_jobs(started, 'mafat_new_q'), 3)
++
++    def test_max_array_size(self):
++        self.assertEqual(queue_limit.parse_pbs_max_array_size('Server: z\n    max_array_size = 10000\n'), 10000)
++        self.assertIsNone(queue_limit.parse_pbs_max_array_size('Server: z\n'))
++        self.assertIsNone(queue_limit.parse_pbs_max_array_size('max_array_size = many'))
++
++
++class TestSlurmParsing(unittest.TestCase):
++
++    def test_max_submit_jobs(self):
++        self.assertEqual(queue_limit.parse_slurm_max_submit_jobs('\n40\n\n100\n'), 40)
++        self.assertIsNone(queue_limit.parse_slurm_max_submit_jobs('\n\n'))
++        self.assertIsNone(queue_limit.parse_slurm_max_submit_jobs('sacctmgr: error'))
++
++    def test_max_array_size(self):
++        self.assertEqual(queue_limit.parse_slurm_max_array_size('MaxJobCount = 10000\nMaxArraySize = 1001\n'), 1000)
++        self.assertIsNone(queue_limit.parse_slurm_max_array_size('nothing here'))
++
++
++class TestDiscoverJobAllowance(unittest.TestCase):
++
++    def _discover(self, software, outputs, **kwargs):
++        with patch('arc.job.pipe.queue_limit.execute_command',
++                   side_effect=lambda command: (outputs(command).splitlines(), [])), \
++                patch('arc.job.pipe.queue_limit.getpass.getuser', return_value='alice'), \
++                patch.dict(queue_limit.settings, {'check_status_command': {
++                    'PBS': '/opt/pbs/bin/qstat -u $USER', 'Slurm': '/usr/bin/squeue -u $USER'}}):
++            return queue_limit.discover_job_allowance(software, 'mafat_new_q', **kwargs)
++
++    @staticmethod
++    def _pbs_outputs(command):
++        if ' -Qf ' in command:
++            return PBS_QUEUE_FULL
++        if command.endswith('-Bf'):
++            return 'Server: zeus\n    max_queued = [u:PBS_GENERIC=100]\n'
++        return '\n'.join(QSTAT_USER)
++
++    def test_pbs_allowance_is_limit_minus_used(self):
++        self.assertEqual(self._discover('pbs', self._pbs_outputs), 38)
++
++    def test_pbs_max_array_size_bounds_the_allowance(self):
++        def outputs(command):
++            if command.endswith('-Bf'):
++                return 'Server: zeus\n    max_array_size = 10\n'
++            return self._pbs_outputs(command)
++        self.assertEqual(self._discover('pbs', outputs), 10)
++
++    def test_pbs_max_array_size_alone_is_the_allowance(self):
++        def outputs(command):
++            return 'Server: zeus\n    max_array_size = 10000\n' if command.endswith('-Bf') else 'Queue: alon_q\n'
++        self.assertEqual(self._discover('pbs', outputs), 10000)
++
++    def test_pbs_uses_wide_output_for_the_user_jobs(self):
++        commands = list()
++
++        def outputs(command):
++            commands.append(command)
++            return self._pbs_outputs(command)
++        self._discover('pbs', outputs)
++        self.assertIn('/opt/pbs/bin/qstat -w -t -u alice', commands)
++
++    def test_pbs_override_replaces_the_read_limit(self):
++        self.assertEqual(self._discover('pbs', self._pbs_outputs, limit_override=10), 8)
++
++    def test_pbs_unparsable_limit_is_unknown(self):
++        self.assertIsNone(self._discover('pbs', lambda command: 'garbage'))
++
++    def test_failing_query_is_unknown(self):
++        with patch('arc.job.pipe.queue_limit.execute_command', side_effect=OSError('no qstat')), \
++                patch.dict(queue_limit.settings, {'check_status_command': {'PBS': '/opt/pbs/bin/qstat -u $USER'}}):
++            self.assertIsNone(queue_limit.discover_job_allowance('pbs', 'q'))
++
++    def test_unqueried_scheduler_is_unknown(self):
++        self.assertIsNone(self._discover('htcondor', lambda command: ''))
++
++    def test_slurm_allowance(self):
++        def outputs(command):
++            if 'sacctmgr' in command:
++                return '40\n'
++            if 'scontrol' in command:
++                return 'MaxArraySize = 1001\n'
++            return '1\n2\n3\n'
++        self.assertEqual(self._discover('slurm', outputs), 37)
++
++    def test_slurm_array_size_limit_applies_without_a_submit_limit(self):
++        def outputs(command):
++            return 'MaxArraySize = 21\n' if 'scontrol' in command else ''
++        self.assertEqual(self._discover('slurm', outputs), 20)
++
++
++class TestNextArraySize(unittest.TestCase):
++
++    def test_halves_down_to_one(self):
++        self.assertEqual([queue_limit.next_array_size(n) for n in (80, 5, 2, 1)], [40, 2, 1, 1])
++
++
++if __name__ == '__main__':
++    unittest.main(testRunner=unittest.TextTestRunner(verbosity=2))
+diff --git a/arc/job/ssh.py b/arc/job/ssh.py
+index 39b0414b0a..b73476fc75 100644
+--- a/arc/job/ssh.py
++++ b/arc/job/ssh.py
+@@ -33,6 +33,7 @@
+ KNOWN_HOSTS_PATH = '~/.ssh/known_hosts'
+ PLACEHOLDER_ADDRESS_SUFFIX = '.host.edu'
+ PLACEHOLDER_USERNAME = '<username>'
++SUBMISSION_CAP_WAIT_SECONDS = 5 * 60
+ 
+ 
+ class UnknownHostKeyError(ServerError, paramiko.SSHException):
+@@ -454,15 +455,15 @@ def check_running_jobs_ids(self) -> list:
+                 running_job_ids.append(job_id)
+         return running_job_ids
+ 
+-    def submit_job(self, remote_path: str,
+-                   recursion: bool = False,
+-                   ) -> tuple[str | None, str | None]:
++    def submit_job(self, remote_path: str) -> tuple[str | None, str | None]:
+         """
+         Submit a job to the server.
++        If Slurm refuses the submission because the per-user job cap is reached
++        (``AssocMaxSubmitJobLimit``), the submission is retried every ``SUBMISSION_CAP_WAIT_SECONDS``
++        until it is accepted.
+ 
+         Args:
+             remote_path (str): The remote path contains the input file and the submission script.
+-            recursion (bool, optional): Whether this call is within a recursion.
+ 
+         Returns: tuple[str, int]
+             - A string indicate the status of job submission.
+@@ -474,6 +475,15 @@ def submit_job(self, remote_path: str,
+         cluster_soft = servers[self.server]['cluster_soft']
+         cmd = f'{submit_command[cluster_soft]} {submit_filenames[cluster_soft]}'
+         stdout, stderr = self._send_command_to_server(cmd, remote_path)
++        waited = False
++        while cluster_soft.lower() == 'slurm' and any('AssocMaxSubmitJobLimit' in line for line in stderr):
++            logger.warning(f'Max number of submitted jobs was reached, sleeping {SUBMISSION_CAP_WAIT_SECONDS} s '
++                           f'before retrying the submission...')
++            time.sleep(SUBMISSION_CAP_WAIT_SECONDS)
++            waited = True
++            stdout, stderr = self._send_command_to_server(cmd, remote_path)
++        if waited and len(stdout):
++            logger.info('The job was submitted after waiting for the per-user job cap to clear.')
+         if len(stderr) > 0 or len(stdout) == 0:
+             logger.warning(f'Got stderr when submitting job:\n{stderr}')
+             job_status = 'errored'
+@@ -484,13 +494,7 @@ def submit_job(self, remote_path: str,
+                 if 'Memory specification can not be satisfied' in line:
+                     logger.warning('User may be requesting more memory than is available. Please check server '
+                                    'settings, such as cpus and memory, in ARC/arc/settings/settings.py.')
+-                if cluster_soft.lower() == 'slurm' and 'AssocMaxSubmitJobLimit' in line:
+-                    logger.warning(f'Max number of submitted jobs was reached, sleeping...')
+-                    time.sleep(5 * 60)
+-                    self.submit_job(remote_path=remote_path, recursion=True)
+-        if recursion:
+-            return None, None
+-        elif cluster_soft.lower() in ['oge', 'sge'] and stdout and 'submitted' in stdout[0].lower():
++        if cluster_soft.lower() in ['oge', 'sge'] and stdout and 'submitted' in stdout[0].lower():
+             job_id = stdout[0].split()[2]
+         elif cluster_soft.lower() == 'slurm' and stdout and 'submitted' in stdout[0].lower():
+             job_id = stdout[0].split()[3]
+diff --git a/arc/job/ssh_test.py b/arc/job/ssh_test.py
+index dc4e9f1464..1cd76c9216 100644
+--- a/arc/job/ssh_test.py
++++ b/arc/job/ssh_test.py
+@@ -1133,5 +1133,43 @@ def test_the_cleanup_connects_with_a_single_attempt(self):
+         self.assertEqual(attempts, [1])
+ 
+ 
++class TestSubmitJobCap(unittest.TestCase):
++    """A per-user job cap must be waited out, and the job that finally gets submitted must be tracked."""
++
++    def _client(self, cluster_soft):
++        """Build an SSHClient without connecting to anything."""
++        server = {'address': 'host.example.edu', 'un': 'user', 'key': '/dev/null', 'cluster_soft': cluster_soft}
++        with patch.object(ssh, 'servers', {'srv': server}):
++            return ssh.SSHClient('srv')
++
++    def _submit(self, cluster_soft, responses):
++        """Submit through a transport that returns ``responses`` in order."""
++        client = self._client(cluster_soft)
++        server = {'address': 'host.example.edu', 'un': 'user', 'key': '/dev/null', 'cluster_soft': cluster_soft}
++        with patch.object(ssh, 'servers', {'srv': server}), \
++                patch.object(ssh, 'submit_command', {cluster_soft: 'sub'}), \
++                patch.object(ssh, 'submit_filenames', {cluster_soft: 'submit.sh'}), \
++                patch.object(client, '_send_command_to_server', side_effect=responses) as mock_send, \
++                patch('time.sleep', return_value=None) as mock_sleep:
++            result = client.submit_job(remote_path='/remote/path')
++        return result, mock_send, mock_sleep
++
++    def test_slurm_cap_retries_until_accepted(self):
++        """The job ID of the attempt that finally succeeds is returned after waiting out the cap."""
++        cap = ([], ['sbatch: error: AssocMaxSubmitJobLimit'])
++        result, mock_send, mock_sleep = self._submit('slurm', [cap, cap, cap, (['Submitted batch job 4242'], [])])
++        self.assertEqual(result, ('running', '4242'))
++        self.assertEqual(mock_send.call_count, 4)
++        self.assertEqual(mock_sleep.call_count, 3)
++        mock_sleep.assert_called_with(ssh.SUBMISSION_CAP_WAIT_SECONDS)
++
++    def test_slurm_accepted_submission_does_not_wait(self):
++        """An accepted submission neither sleeps nor retries."""
++        result, mock_send, mock_sleep = self._submit('slurm', [(['Submitted batch job 5'], [])])
++        self.assertEqual(result, ('running', '5'))
++        self.assertEqual(mock_send.call_count, 1)
++        mock_sleep.assert_not_called()
++
++
+ if __name__ == '__main__':
+     unittest.main(testRunner=unittest.TextTestRunner(verbosity=2))
+diff --git a/arc/scheduler_pipe_test.py b/arc/scheduler_pipe_test.py
+index b1a30cca8d..985d5c3d4c 100644
+--- a/arc/scheduler_pipe_test.py
++++ b/arc/scheduler_pipe_test.py
+@@ -84,6 +84,13 @@ def _complete_task(pipe_root, task_id):
+     update_task_state(pipe_root, task_id, new_status=TaskState.COMPLETED, ended_at=now)
+ 
+ 
++def _patch_successful_submission(test_case):
++    """Make every pipe run in ``test_case`` submit, so polling is not about a run that was never submitted."""
++    submit = patch('arc.job.pipe.pipe_run.PipeRun.submit_to_scheduler', return_value=('submitted', '4242[]'))
++    submit.start()
++    test_case.addCleanup(submit.stop)
++
++
+ _pipe_patches = []
+ 
+ 
+@@ -177,6 +184,7 @@ class TestPollPipes(unittest.TestCase):
+     def setUp(self):
+         self.tmpdir = tempfile.mkdtemp(prefix='pipe_poll_test_')
+         self.sched = _make_scheduler(self.tmpdir)
++        _patch_successful_submission(self)
+ 
+     def tearDown(self):
+         shutil.rmtree(self.tmpdir, ignore_errors=True)
+@@ -246,6 +254,7 @@ class TestScheduleJobsLoopCondition(unittest.TestCase):
+     def setUp(self):
+         self.tmpdir = tempfile.mkdtemp(prefix='pipe_loop_test_')
+         self.sched = _make_scheduler(self.tmpdir)
++        _patch_successful_submission(self)
+ 
+     def tearDown(self):
+         shutil.rmtree(self.tmpdir, ignore_errors=True)
+@@ -1019,6 +1028,7 @@ class TestNoResubmissionLifecycle(unittest.TestCase):
+     def setUp(self):
+         self.tmpdir = tempfile.mkdtemp(prefix='pipe_resub_test_')
+         self.sched = _make_scheduler(self.tmpdir)
++        _patch_successful_submission(self)
+ 
+     def tearDown(self):
+         shutil.rmtree(self.tmpdir, ignore_errors=True)
+@@ -1277,6 +1287,7 @@ class TestPollPipesIntegration(unittest.TestCase):
+     def setUp(self):
+         self.tmpdir = tempfile.mkdtemp(prefix='pipe_poll_int_')
+         self.sched = _make_scheduler(self.tmpdir)
++        _patch_successful_submission(self)
+ 
+     def tearDown(self):
+         shutil.rmtree(self.tmpdir, ignore_errors=True)
+diff --git a/arc/settings/settings.py b/arc/settings/settings.py
+index a893668292..dd1b0f7f28 100644
+--- a/arc/settings/settings.py
++++ b/arc/settings/settings.py
+@@ -379,6 +379,8 @@
+     'enabled': False,          # Set to True to enable pipe mode (it is off by default, use it for large compute campaigns).
+     'min_tasks': 10,           # Minimum batch size to trigger pipe mode.
+     'max_workers': 100,        # Upper bound on array worker slots per PipeRun.
++    'max_queued_jobs': None,   # The per-user job limit of the queue, if you know it (e.g., 40). None lets ARC read it from
++                               # the scheduler and, whatever it reads, shrink a job array the queue refuses.
+     'run_locally': False,      # Run the pipe array as a local pool of worker processes instead of
+                                # submitting it to a queue. Use on a workstation with no queueing
+                                # system (e.g., to parallelize local PySCF jobs).
+@@ -386,7 +388,7 @@
+                                # budget (the 'local' server's 'cpus') and available memory. Set an
+                                # int to override; note an explicit value wins outright and can exceed
+                                # the CPU budget, so total cores may pass servers['local']['cpus'].
+-    'max_attempts': 3,         # Retry budget per task before terminal failure.
++    'max_attempts': 3,         # Retry budget per task before terminal failure; also the submission attempts of a pipe job array.
+     'lease_duration_hrs': 1,   # Worker lease duration in hours (default 1h).
+     'env_setup': {},           # Engine-specific shell setup commands, e.g.,
+                                # {'gaussian': 'source /usr/local/g09/setup.sh',

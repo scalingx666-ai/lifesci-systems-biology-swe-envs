@@ -1,0 +1,149 @@
+diff --git a/README.md b/README.md
+index 9260c93d..d72e788a 100644
+--- a/README.md
++++ b/README.md
+@@ -40,7 +40,7 @@ There are 4 alternative ways to install CNApy:
+ 
+ 1. The easiest way for any user to install CNApy is by downloading its installer, which is provided for Windows, Linux and MacOS, see [Using CNApy installer](#using-cnapy-installer) for more.
+ 2. If you already have installed Python 3.10 (no other version) on your system, you can install CNApy simply through ```pip install cnapy``` in your console. Afterwards, you can start CNApy's GUI by running either ```cnapy``` or, if this doesn't work, ```python -m cnapy``` where "python" must call your Python 3.10 installation.
+-3. If you already use conda or mamba (for mamba, just change the "conda" command to "mamba"), you can create a CNApy environment named ```cnapy-1.2.10``` as follows: 1) Run ```conda create --name cnapy-1.2.10 python=3.10 pip openjdk -c conda-forge```, 2) run ```conda activate cnapy-1.2.10```, 3) run ```pip install cnapy```. Then, you can start CNApy in the cnapy-1.2.10 conda environment by running either ```cnapy``` or, if this doesn't work, ```python -m cnapy```. Note that the [cnapy conda package](https://anaconda.org/cnapy/cnapy) is currently *not* being updated due to licensing uncertainties.
++3. If you already use conda or mamba (for mamba, just change the "conda" command to "mamba"), you can create a CNApy environment named ```cnapy-1.2.11``` as follows: 1) Run ```conda create --name cnapy-1.2.11 python=3.10 pip openjdk -c conda-forge```, 2) run ```conda activate cnapy-1.2.11```, 3) run ```pip install cnapy```. Then, you can start CNApy in the cnapy-1.2.11 conda environment by running either ```cnapy``` or, if this doesn't work, ```python -m cnapy```. Note that the [cnapy conda package](https://anaconda.org/cnapy/cnapy) is currently *not* being updated due to licensing uncertainties.
+ 4. If you want to develop CNApy, follow the instruction for the cloning and setup of the CNApy repository using git and conda or mamba in section [Setup the CNApy development environment](#setup-the-cnapy-development-environment).
+ 
+ ## Documentation and Tutorials
+@@ -56,18 +56,18 @@ This installer lets you create a local installation of CNApy under Windows, Linu
+ 
+ *If you use Windows:*
+ 
+-- Download the Windows installer [from here](https://github.com/cnapy-org/CNApy/releases/download/v1.2.10/install_cnapy_here.bat)
++- Download the Windows installer [from here](https://github.com/cnapy-org/CNApy/releases/download/v1.2.11/install_cnapy_here.bat)
+ - Put this file into a folder where you want CNApy to be installed.
+ - Double click on the file and let the CNApy installation run
+-- Afterwards, you can run CNApy by either double-clicking on the newly created CNApy desktop icon, or by double-clicking "RUN_CNApy.bat" in the newly created cnapy-1.2.10 subfolder.
++- Afterwards, you can run CNApy by either double-clicking on the newly created CNApy desktop icon, or by double-clicking "RUN_CNApy.bat" in the newly created cnapy-1.2.11 subfolder.
+ 
+ *If you use Linux or MacOS*:
+ 
+-- Download the Linux & MacOS installer [from here](https://github.com/cnapy-org/CNApy/releases/download/v1.2.10/install_cnapy_here.sh).
++- Download the Linux & MacOS installer [from here](https://github.com/cnapy-org/CNApy/releases/download/v1.2.11/install_cnapy_here.sh).
+ - Put this file into a folder where you want CNApy to be installed.
+ - Make the script executable by opening your console in the folder and run ```chmod u+x ./install_cnapy_here.sh```. Alternatively, if supported on your system, right-click on the file, go the file's settings and mark it as executable.
+ - Now, either run ```./install_cnapy_here.sh``` in your console or, if supported on your system, double-click on install_cnapy_here.sh.
+-- Finally, you can run CNApy by calling ```./run_cnapy.sh``` in your console (for this without another path beforehand, your console must point to the folder where run_cnapy.sh is located, e.g. if you are in the folder where install_cnapy_here.sh is located, through ```cd cnapy-1.2.10```). Alternatively, if supported by your system, double-click on "run_cnapy.sh" in the newly created cnapy-1.2.10 subfolder.
++- Finally, you can run CNApy by calling ```./run_cnapy.sh``` in your console (for this without another path beforehand, your console must point to the folder where run_cnapy.sh is located, e.g. if you are in the folder where install_cnapy_here.sh is located, through ```cd cnapy-1.2.11```). Alternatively, if supported by your system, double-click on "run_cnapy.sh" in the newly created cnapy-1.2.11 subfolder.
+ 
+ Technical side note: CNApy's installer is utilizing [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html).
+ 
+diff --git a/cnapy/appdata.py b/cnapy/appdata.py
+index 6398d458..9fb08148 100644
+--- a/cnapy/appdata.py
++++ b/cnapy/appdata.py
+@@ -31,7 +31,7 @@ class AppData(QObject):
+ 
+     def __init__(self):
+         QObject.__init__(self)
+-        self.version = "cnapy-1.2.10"
++        self.version = "cnapy-1.2.11"
+         self.format_version = 2
+         self.unsaved = False
+         self.project = ProjectData()
+diff --git a/docs/index.md b/docs/index.md
+index 8c3ed48b..adb273bf 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -61,13 +61,13 @@ Everyone is welcome to contribute to CNApy's development. [See our contribution
+ 3. Create a conda environment with all dependencies
+ 
+     ```sh
+-    conda create -n cnapy-1.2.10 -c conda-forge -c cnapy cnapy=1.2.10
++    conda create -n cnapy-1.2.11 -c conda-forge -c cnapy cnapy=1.2.11
+     ```
+ 
+ 4. Activate the cnapy conda environment
+ 
+     ```sh
+-    conda activate cnapy-1.2.10
++    conda activate cnapy-1.2.11
+     ```
+ 
+ 5. Run CNApy within you activated conda environment
+diff --git a/installers/install_cnapy_here.bat b/installers/install_cnapy_here.bat
+index 52ee1925..7564d411 100644
+--- a/installers/install_cnapy_here.bat
++++ b/installers/install_cnapy_here.bat
+@@ -7,7 +7,7 @@ set "psFile=install_cnapy.ps1"
+ :: Write the PowerShell script to a file
+ echo # Adapted from https://raw.githubusercontent.com/mamba-org/micromamba-releases/main/install.ps1 > "%psFile%"
+ echo. >> "%psFile%"
+-echo $CNAPY_VERSION = "1.2.10"  ^# Replace with the actual version if needed >> "%psFile%"
++echo $CNAPY_VERSION = "1.2.11"  ^# Replace with the actual version if needed >> "%psFile%"
+ echo $RELEASE_URL="https://github.com/mamba-org/micromamba-releases/releases/latest/download/micromamba-win-64" >> "%psFile%"
+ echo. >> "%psFile%"
+ echo Write-Output "Downloading micromamba from $RELEASE_URL" >> "%psFile%"
+@@ -25,8 +25,8 @@ echo Write-Output "`nInstalling micromamba to $InstallDir`n" >> "%psFile%"
+ echo Move-Item -Force micromamba.exe $MAMBA_INSTALL_PATH ^| out-null >> "%psFile%"
+ echo. >> "%psFile%"
+ echo ^# Use ^& to execute the micromamba commands stored in the variable >> "%psFile%"
+-echo ^& $MAMBA_INSTALL_PATH create -y -p "./cnapy-$CNAPY_VERSION/cnapy-environment" python=3.10 pip openjdk -r "./cnapy-$CNAPY_VERSION/" -c conda-forge >> "%psFile%"
+-echo Copy-Item -Path "cnapy-1.2.10/condabin/mamba.bat" -Destination "cnapy-1.2.10/condabin/micromamba.bat" >> "%psFile%"
++echo ^& $MAMBA_INSTALL_PATH create -y -p "./cnapy-$CNAPY_VERSION/cnapy-environment" python=3.10 pip openjdk scip glpk -r "./cnapy-$CNAPY_VERSION/" -c conda-forge >> "%psFile%"
++echo Copy-Item -Path "cnapy-1.2.11/condabin/mamba.bat" -Destination "cnapy-1.2.11/condabin/micromamba.bat" >> "%psFile%"
+ echo ^& $MAMBA_INSTALL_PATH run -p "./cnapy-$CNAPY_VERSION/cnapy-environment" -r "./cnapy-$CNAPY_VERSION/" pip install --no-cache-dir uv >> "%psFile%"
+ echo ^& $MAMBA_INSTALL_PATH run -p "./cnapy-$CNAPY_VERSION/cnapy-environment" -r "./cnapy-$CNAPY_VERSION/" uv --no-cache pip install --no-cache-dir cnapy >> "%psFile%"
+ echo. >> "%psFile%"
+@@ -68,9 +68,9 @@ if exist "%psFile%" (
+ 
+     :: Congratulate the user
+     echo Congratulations! CNApy was successfully installed!
+-    echo To run CNApy, double-click on the newly created CNApy-1.2.10 desktop icon or,
+-    echo alternatively, double-click on the RUN_CNApy.bat file in the newly created cnapy-1.2.10 subfolder.
+-    echo To deinstall CNApy later, simply delete the newly created cnapy-1.2.10 subfolder.
++    echo To run CNApy, double-click on the newly created CNApy-1.2.11 desktop icon or,
++    echo alternatively, double-click on the RUN_CNApy.bat file in the newly created cnapy-1.2.11 subfolder.
++    echo To deinstall CNApy later, simply delete the newly created cnapy-1.2.11 subfolder.
+     pause
+ ) else (
+     echo PowerShell script file not found: %psFile%
+diff --git a/installers/install_cnapy_here.sh b/installers/install_cnapy_here.sh
+index 8739e7b6..9dba5e83 100755
+--- a/installers/install_cnapy_here.sh
++++ b/installers/install_cnapy_here.sh
+@@ -4,7 +4,7 @@
+ set -eu
+ 
+ # CNApy version
+-CNAPY_VERSION="1.2.10"
++CNAPY_VERSION="1.2.11"
+ 
+ # Folders
+ BIN_FOLDER="${BIN_FOLDER:-./cnapy-${CNAPY_VERSION}}"
+@@ -51,7 +51,7 @@ else
+ fi
+ chmod +x "${BIN_FOLDER}/micromamba"
+ 
+-./cnapy-${CNAPY_VERSION}/micromamba create -y -p ./cnapy-${CNAPY_VERSION}/cnapy-environment python=3.10 pip openjdk -r ./cnapy-${CNAPY_VERSION}/ -c conda-forge
++./cnapy-${CNAPY_VERSION}/micromamba create -y -p ./cnapy-${CNAPY_VERSION}/cnapy-environment python=3.10 pip openjdk scip glpk -r ./cnapy-${CNAPY_VERSION}/ -c conda-forge
+ ./cnapy-${CNAPY_VERSION}/micromamba run -p ./cnapy-${CNAPY_VERSION}/cnapy-environment -r ./cnapy-${CNAPY_VERSION}/ pip install --no-cache-dir uv
+ ./cnapy-${CNAPY_VERSION}/micromamba run -p ./cnapy-${CNAPY_VERSION}/cnapy-environment -r ./cnapy-${CNAPY_VERSION}/ uv --no-cache pip install --no-cache-dir cnapy
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index fa0b3b68..97f625e7 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -1,6 +1,6 @@
+ [project]
+ name = "cnapy"
+-version = "1.2.10"
++version = "1.2.11"
+ authors = [
+   { name="Sven Thiele" },
+   { name="Axel von Kamp" },
+@@ -34,7 +34,7 @@ dependencies = [
+     "openpyxl",
+     "jpype1==1.5.0",
+     "setuptools",
+-    "cobrak==0.0.11",
++    "cobrak==0.0.13",
+     "highspy>=1.14.0",
+     "nest_asyncio",
+ ]

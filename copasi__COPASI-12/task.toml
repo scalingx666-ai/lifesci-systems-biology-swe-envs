@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/copasi__COPASI-12"
+description = "Do not expand function calls when creating DiscontinuityDataEvents to fix bug (crash)"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "COPASI",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "copasi/COPASI"
+ref = "d90b61fe328bf0a29423f484bdd34a46b339c859"
+reference = "https://github.com/copasi/COPASI/pull/12"
+source_access = "auto"
+built_at = "2026-11-14T07:01:25.397128+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:ec8dbe1a355aadae6b95c99c9bcff6ce2c76abfbb5c0c69c596fda4a7e12f1cb"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-01-08T17:58:47Z"
+diff_format = "unified"
+context_files = [
+    "copasi/math/CMathContainer.cpp",
+    "copasi/math/CMathContainer.h",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 74
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

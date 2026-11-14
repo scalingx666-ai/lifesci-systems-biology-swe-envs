@@ -1,0 +1,65 @@
+version = "1.0"
+
+[task]
+name = "default/pysb__pysb-619"
+description = "Allow Python 3.10 compatibility"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "pysb",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "pysb/pysb"
+ref = "48b61d8a6cfdf2b6a355b44326917f3ff3d2c795"
+reference = "https://github.com/pysb/pysb/pull/619"
+source_access = "auto"
+built_at = "2026-11-14T07:00:57.311771+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:fd0f588718d9d6fcc54a1bbfe6a2b611c076de76805b59c4f5fef81fbb1da6e6"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-05-19T03:12:49Z"
+diff_format = "unified"
+context_files = [
+    ".github/pysb-conda-env.yml",
+    ".github/workflows/ci.yml",
+    "pysb/simulator/base.py",
+    "setup.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 17
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

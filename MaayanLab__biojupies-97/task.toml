@@ -1,0 +1,76 @@
+version = "1.0"
+
+[task]
+name = "default/MaayanLab__biojupies-97"
+description = "Cherry-picked commits for biojupies fixes"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "biojupies",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "MaayanLab/biojupies"
+ref = "4eaf261c7f3fd7d4601d30459c7bf4cb008785dd"
+reference = "https://github.com/MaayanLab/biojupies/pull/97"
+source_access = "auto"
+built_at = "2026-11-14T07:01:33.435607+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:b19fee979d84697528847dd8c37835e080abc6eb41c1bdffa6a0e8963edb557a"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2020-05-13T17:42:22Z"
+diff_format = "unified"
+context_files = [
+    "server/app/app.py",
+    "website/.dockerignore",
+    "website/.env.example",
+    "website/.gitignore",
+    "website/Dockerfile",
+    "website/app/app.py",
+    "website/app/static/py/Query.py",
+    "website/app/static/py/TableManager.py",
+    "website/app/templates/analyze/results.html",
+    "website/app/templates/base.html",
+    "website/app/templates/user/dashboard.html",
+    "website/boot.sh",
+    "website/dev.txt",
+    "website/pkglist.txt",
+    "website/requirements.txt",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 389
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

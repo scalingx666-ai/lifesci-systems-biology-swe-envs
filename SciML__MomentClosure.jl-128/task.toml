@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/SciML__MomentClosure.jl-128"
+description = "Update DocStringExtensions requirement from 0.9.5 to 0.9.5, 0.10 in the all-julia-packages group"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "MomentClosure.jl",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "SciML/MomentClosure.jl"
+ref = "c4bbb1fb2da29ee47a84e4274ebdff84e07ada0e"
+reference = "https://github.com/SciML/MomentClosure.jl/pull/128"
+source_access = "auto"
+built_at = "2026-11-14T07:04:16.179859+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:ccfbfb4db23d450767012177368db0c02bc52caeca6f5a5f22a066f1c2942037"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-02T01:46:34Z"
+diff_format = "unified"
+context_files = [
+    "Project.toml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

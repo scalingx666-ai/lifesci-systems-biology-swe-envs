@@ -1,0 +1,63 @@
+version = "1.0"
+
+[task]
+name = "default/seek4science__seek-2786"
+description = "Bump omniauth from 2.1.4 to 2.2.0"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "seek",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "seek4science/seek"
+ref = "a52d43c17321fc5dd612ff872f43c69ae3d8e416"
+reference = "https://github.com/seek4science/seek/pull/2786"
+source_access = "auto"
+built_at = "2026-11-14T07:01:59.167798+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:edf07d1ca8a8ce3d95591e4fee4a5cd8909c1d8b3197d55c0d6e675f952a7f5c"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-13T16:02:23Z"
+diff_format = "unified"
+context_files = [
+    "Gemfile.lock",
+    "config/version.yml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 12
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

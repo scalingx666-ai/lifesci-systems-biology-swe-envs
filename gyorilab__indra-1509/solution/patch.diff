@@ -1,0 +1,465 @@
+diff --git a/indra/literature/__init__.py b/indra/literature/__init__.py
+index cf21281c2b..4fa2159520 100644
+--- a/indra/literature/__init__.py
++++ b/indra/literature/__init__.py
+@@ -5,7 +5,6 @@
+ from indra.literature import pmc_client
+ from indra.literature import crossref_client
+ from indra.literature import elsevier_client
+-from functools import lru_cache
+ from indra.util import UnicodeXMLTreeBuilder as UTB
+ 
+ logger = logging.getLogger(__name__)
+@@ -100,7 +99,7 @@ def get_full_text(paper_id, idtype, preferred_content_type='text/xml'):
+     doi = ids.get('doi')
+     # First try to find paper via PMC
+     if pmcid:
+-        nxml = pmc_client.get_xml(pmcid)
++        nxml = pmc_client.get_xml_s3(pmcid)
+         if nxml:
+             return nxml, 'pmc_oa_xml'
+     # If we got here, it means we didn't find the full text in PMC, so we'll
+diff --git a/indra/literature/adeft_tools.py b/indra/literature/adeft_tools.py
+index f5f19a7644..82879ac0f1 100644
+--- a/indra/literature/adeft_tools.py
++++ b/indra/literature/adeft_tools.py
+@@ -68,7 +68,7 @@ def get_text_content_for_pmids(pmids):
+     failed = set()
+     for pmc_id in pmc_ids:
+         if pmc_id is not None:
+-            pmc_xmls.append(pmc_client.get_xml(pmc_id))
++            pmc_xmls.append(pmc_client.get_xml_s3(pmc_id))
+         else:
+             failed.add(pmid)
+         time.sleep(0.5)
+diff --git a/indra/literature/pmc_client.py b/indra/literature/pmc_client.py
+index 7b666b3bcf..44b6d79707 100644
+--- a/indra/literature/pmc_client.py
++++ b/indra/literature/pmc_client.py
+@@ -1,10 +1,10 @@
+ import re
+ import logging
+ import os
++import time
+ import requests
+ from functools import lru_cache
+ from lxml import etree
+-from lxml.etree import QName
+ import xml.etree.ElementTree as ET
+ 
+ from indra.literature import pubmed_client
+@@ -13,7 +13,7 @@
+ 
+ logger = logging.getLogger(__name__)
+ 
+-pmc_url = 'https://www.ncbi.nlm.nih.gov/pmc/oai/oai.cgi'
++pmc_url = 'https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/'
+ pmid_convert_url = 'https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/'
+ pmc_s3_base_url = 'https://pmc-oa-opendata.s3.amazonaws.com'
+ s3_nsmap = {'s3': 'http://s3.amazonaws.com/doc/2006-03-01/'}
+@@ -345,8 +345,66 @@ def get_ids(search_term, retmax=1000):
+     return pubmed_client.get_ids(search_term, retmax=retmax, db='pmc')
+ 
+ 
+-def get_xml(pmc_id):
+-    """Returns XML for the article corresponding to a PMC ID."""
++def _run_pmc_xml_request(pmc_params: dict, max_retries: int = 4):
++    # Run a request to the PMC OAI service, return the XML tree if successful,
++    # and handle 429 errors. Per the documentation at
++    # https://pmc.ncbi.nlm.nih.gov/tools/oai/, the endpoint only handles 3
++    # requests per second. If a 429 error is sent back, the server typically
++    # penalizes the client for a longer period of time than that limit, hence
++    # the exponential backoff.
++    max_sleep = 60.0
++    attempt = 0
++    res = requests.get(pmc_url, params=pmc_params)
++    while res.status_code == 429 and attempt < max_retries:
++        sleep_time = min(3**attempt, max_sleep)
++        logger.warning(
++            f"Got 429 from PMC OAI service, retrying in {sleep_time} seconds"
++        )
++        time.sleep(sleep_time)
++        attempt += 1
++        res = requests.get(pmc_url, params=pmc_params)
++
++    return res
++
++
++def get_xml(pmc_id: str, raise_for_status: bool = False, max_retries: int = 4):
++    """Returns XML for the article corresponding to a PMC ID
++
++    Parameters
++    ----------
++    pmc_id :
++        A PubMed Central ID in 'PMC<digits>' form.
++    raise_for_status :
++        If True, raise an HTTPError if the request fails. If False, return
++        None on failure.
++    max_retries :
++        Maximum number of retries to make if the request fails with a 429
++        error.
++
++    Returns
++    -------
++    : str | None
++        The XML content as a unicode string, or None if the request fails
++        and raise_on_status is False.
++
++    Notes
++    -----
++    The endpoint this function relies on is aggressively rate limited and should
++    only be used for single requests. To do bulk requesting, consider using the
++    PMC Cloud S3 endpoints instead, which are not rate limited and with a more
++    robust API.
++    See https://pmc.ncbi.nlm.nih.gov/tools/oai/ for more information.
++
++    See Also
++    --------
++    The following functions are available from the PMC client module to interact
++    with the PMC Cloud Service hosted on AWS S3:
++    - :func:`download_article_files_s3`
++    - :func:`get_metadata_s3`
++    - :func:`get_pdf_s3`
++    - :func:`get_text_s3`
++    - :func:`get_xml_s3`
++    """
+     if pmc_id.upper().startswith('PMC'):
+         pmc_id = pmc_id[3:]
+     # Request params
+@@ -355,9 +413,11 @@ def get_xml(pmc_id):
+     params['identifier'] = 'oai:pubmedcentral.nih.gov:%s' % pmc_id
+     params['metadataPrefix'] = 'pmc'
+     # Submit the request
+-    res = requests.get(pmc_url, params)
++    res = _run_pmc_xml_request(params, max_retries=max_retries)
++    if raise_for_status:
++        res.raise_for_status()
+     if not res.status_code == 200:
+-        logger.warning("Couldn't download %s" % pmc_id)
++        logger.warning(f"Couldn't download {pmc_id}. Got status {res.status_code}")
+         return None
+     # Read the bytestream
+     xml_bytes = res.content
+@@ -742,7 +802,7 @@ def _xpath_union(*xpath_list):
+ 
+ 
+ def get_title(pmcid):
+-    xml_string = get_xml(pmcid)
++    xml_string = get_xml_s3(pmcid)
+     if not xml_string:
+         return
+     tree = etree.fromstring(xml_string.encode('utf-8'))
+diff --git a/indra/literature/pubmed_client.py b/indra/literature/pubmed_client.py
+index fa3d29d908..74d9d35e72 100644
+--- a/indra/literature/pubmed_client.py
++++ b/indra/literature/pubmed_client.py
+@@ -9,6 +9,7 @@
+ from datetime import datetime
+ 
+ import time
++from concurrent.futures import ThreadPoolExecutor
+ from io import StringIO
+ 
+ import tqdm
+@@ -1384,7 +1385,9 @@ def is_retracted(pubmed_id: str) -> bool:
+     return retractions.is_retracted(pubmed_id)
+ 
+ 
+-def generate_retractions_file(xml_path: str, download_missing: bool = False):
++def generate_retractions_file(
++    xml_path: str, download_missing: bool = False, max_workers: int = 1
++):
+     """Generate a CSV file of retracted papers from the PubMed XML.
+ 
+     Parameters
+@@ -1396,9 +1399,11 @@ def generate_retractions_file(xml_path: str, download_missing: bool = False):
+         If True, download any missing XML files from the PubMed FTP server.
+         Default: False. Note: A full download of the PubMed XML files takes up
+         to 5 hours.
++    max_workers :
++        Number of parallel download threads. Default: 1 (serial). Maximum: 4.
+     """
+     if download_missing:
+-        ensure_xml_files(xml_path)
++        ensure_xml_files(xml_path, max_workers=max_workers)
+     retractions = set()
+ 
+     files = glob.glob(os.path.join(xml_path, 'pubmed*.xml.gz'))
+@@ -1423,9 +1428,34 @@ def generate_retractions_file(xml_path: str, download_missing: bool = False):
+         fh.write('\n'.join(sorted(retractions)))
+ 
+ 
+-def ensure_xml_files(xml_path: str, retries: int = 3):
++def ensure_xml_files(
++    xml_path: str,
++    retries: int = 3,
++    raise_http_error: bool = True,
++    raise_checksum_error: bool = False,
++    force: bool = False,
++    max_workers: int = 1,
++) -> None:
+     """Ensure that the XML files are downloaded and up to date.
+ 
++    This function downloads the full archive published by PubMed at
++    https://ftp.ncbi.nlm.nih.gov/pubmed/baseline and
++    https://ftp.ncbi.nlm.nih.gov/pubmed/updatefiles which contains citation
++    records holding metadata and abstracts in XML format. The baseline archive
++    is updated yearly, while the baseline archive is updated daily and includes
++    new, revised, and deleted citations. After downloading this archive, it can
++    be used to extract e.g. mesh annotation of articles, publication year,
++    retractions, author information. The files in the archive constsist of a
++    set of gzipped XML files, with each XML file containing multiple records for
++    a set of publications. See
++    https://dtd.nlm.nih.gov/ncbi/pubmed/doc/out/250101/index.html for more
++    information about this archive.
++
++    Use this function to create a complete data set from all available citation
++    records. If only a subset of records is needed, use e.g.
++    `get_metadata_for_all_ids` in this module to get metadata from a list of
++    pmids.
++
+     Parameters
+     ----------
+     xml_path :
+@@ -1434,32 +1464,72 @@ def ensure_xml_files(xml_path: str, retries: int = 3):
+     retries :
+         Number of times to retry downloading an individual XML file if there
+         is an HTTP error. Default: 3.
++    raise_http_error :
++        If True, raise an HTTPError if an XML file cannot be downloaded after
++        the specified number of retries. If False, log a warning and skip the
++        file.
++    raise_checksum_error :
++        If True, raise a ValueError if the checksum of a downloaded XML file
++        does not match the expected checksum. If False, log a warning and skip
++        the file. Default: False.
++    force :
++        If True, force re-download of all XML files, even if they already exist.
++    max_workers :
++        Number of parallel download threads. Default: 1 (serial). Maximum: 4.
+     """
++    max_workers = max(1, min(4, max_workers))
+     xml_path = Path(xml_path)
+     xml_path.mkdir(parents=True, exist_ok=True)
+ 
+     basefiles = [u for u in _get_urls(pubmed_archive_baseline)]
+     updatefiles = [u for u in _get_urls(pubmed_archive_update)]
+ 
+-    # Count successfully downloaded files
+-    for xml_url in tqdm.tqdm(
+-            basefiles + updatefiles, desc="Downloading PubMed XML files"
+-    ):
++    total_files = len(basefiles) + len(updatefiles)
++
++    def _ensure_one(xml_url: str) -> bool:
+         xml_file_path = xml_path.joinpath(xml_url.split("/")[-1])
+-        if not xml_file_path.exists():
+-            success = _download_xml_gz(xml_url, xml_file_path, retries=retries)
++        if force or not xml_file_path.exists():
++            success = _download_xml_gz(
++                xml_url,
++                xml_file_path,
++                raise_http_error=raise_http_error,
++                md5_check=raise_checksum_error,
++                retries=retries,
++            )
+             if not success:
+                 tqdm.tqdm.write(f"Error downloading {xml_url}, skipping")
++                return False
++        return True
++
++    urls = basefiles + updatefiles
++    with ThreadPoolExecutor(max_workers=max_workers) as executor:
++        results = list(tqdm.tqdm(
++            executor.map(_ensure_one, urls),
++            total=total_files,
++            desc="Downloading PubMed XML files",
++            unit="file",
++        ))
++    skips = sum(1 for success in results if not success)
++
++    if skips:
++        logger.warning(f"Skipped {skips} out of {total_files}")
++        missing_files = [
++            xml_url for xml_url in basefiles + updatefiles
++            if not xml_path.joinpath(xml_url.split("/")[-1]).exists()
++        ]
++        missing_str = "\n".join(missing_files)
+ 
++        logger.warning(f"Missing {len(missing_files)} files:\n{missing_str}")
+ 
+-def _get_urls(url: str):
++
++def _get_urls(index_url: str):
+     """Get the paths to all XML files on the PubMed FTP server."""
+     from bs4 import BeautifulSoup
+ 
+-    logger.info("Getting URL paths from %s" % url)
++    logger.info("Getting URL paths from %s" % index_url)
+ 
+-    # Get page
+-    response = requests.get(url)
++    # Get root page with the XML files
++    response = requests.get(index_url)
+     response.raise_for_status()
+ 
+     # Make soup
+@@ -1468,7 +1538,7 @@ def _get_urls(url: str):
+     soup = BeautifulSoup(response.text, "html.parser")
+ 
+     # Append trailing slash if not present
+-    url = url if url.endswith("/") else url + "/"
++    index_url = index_url if index_url.endswith("/") else index_url + "/"
+ 
+     # Loop over all links
+     for link in soup.find_all("a"):
+@@ -1477,11 +1547,16 @@ def _get_urls(url: str):
+         # 'pubmed<2 digit year>n<4 digit file index>.xml.gz'
+         # but skip the md5 files
+         if href and href.startswith("pubmed") and href.endswith(".xml.gz"):
+-            yield url + href
++            yield index_url + href
+ 
+ 
+-def _download_xml_gz(xml_url: str, xml_file: Path, md5_check: bool = True,
+-                     retries: int = 3) -> bool:
++def _download_xml_gz(
++    xml_url: str,
++    xml_file: Path,
++    raise_http_error: bool = False,
++    md5_check: bool = True,
++    retries: int = 3,
++) -> bool:
+     try:
+         resp = requests.get(xml_url)
+         resp.raise_for_status()
+@@ -1489,8 +1564,13 @@ def _download_xml_gz(xml_url: str, xml_file: Path, md5_check: bool = True,
+         if retries > 0:
+             tqdm.tqdm.write(f"Error downloading {xml_url}, retrying." + str(e))
+             sleep(1)
+-            return _download_xml_gz(xml_url, xml_file, md5_check, retries - 1)
++            return _download_xml_gz(
++                xml_url, xml_file, raise_http_error, md5_check, retries - 1
++            )
+         else:
++            if raise_http_error:
++                logger.error(f"Error downloading {xml_url}: {e}")
++                raise e
+             tqdm.tqdm.write(f"Error downloading {xml_url}, skipping")
+             return False
+ 
+diff --git a/indra/sources/reach/api.py b/indra/sources/reach/api.py
+index 63d19dfdff..8aa5d71d1c 100644
+--- a/indra/sources/reach/api.py
++++ b/indra/sources/reach/api.py
+@@ -73,7 +73,7 @@ def process_pmc(pmc_id, offline=False, url=None,
+     """
+     # Loading content from PMC first
+     logger.info('Loading %s from PMC' % pmc_id)
+-    xml_str = pmc_client.get_xml(pmc_id)
++    xml_str = pmc_client.get_xml_s3(pmc_id)
+     if xml_str is None:
+         return None
+     # Write into a file in the working folder
+diff --git a/indra/tests/test_adeft_tools.py b/indra/tests/test_adeft_tools.py
+index 3c883bc48e..9c75012603 100644
+--- a/indra/tests/test_adeft_tools.py
++++ b/indra/tests/test_adeft_tools.py
+@@ -24,7 +24,7 @@ def test_universal_extract_paragraphs_elsevier():
+ @pytest.mark.webservice
+ def test_universal_extract_paragraphs_pmc():
+     pmc_id = 'PMC3262597'
+-    xml_str = pmc_client.get_xml(pmc_id)
++    xml_str = pmc_client.get_xml_s3(pmc_id)
+     paragraphs = universal_extract_paragraphs(xml_str)
+     assert len(paragraphs) > 1, paragraphs
+ 
+diff --git a/indra/tests/test_pmc_client.py b/indra/tests/test_pmc_client.py
+index d3900b067a..8f73dc73af 100644
+--- a/indra/tests/test_pmc_client.py
++++ b/indra/tests/test_pmc_client.py
+@@ -75,7 +75,7 @@ def test_invalid_idtype():
+         ids = pmc_client.id_lookup('DOI10.18632/oncotarget.2555', idtype='foo')
+ 
+ 
+-@pytest.mark.webservice
++@pytest.mark.skip('PMC OA REST API is unstable')
+ def test_get_xml():
+     pmc_id = '4322985'
+     xml_str = pmc_client.get_xml(pmc_id)
+@@ -83,7 +83,7 @@ def test_get_xml():
+     assert unicode_strs((pmc_id, xml_str))
+ 
+ 
+-@pytest.mark.webservice
++@pytest.mark.skip('PMC OA REST API is unstable')
+ def test_get_xml_PMC():
+     pmc_id = 'PMC4322985'
+     xml_str = pmc_client.get_xml(pmc_id)
+@@ -92,6 +92,14 @@ def test_get_xml_PMC():
+ 
+ 
+ @pytest.mark.webservice
++def test_get_xml_PMC_s3():
++    pmc_id = 'PMC4322985'
++    xml_str = pmc_client.get_xml_s3(pmc_id)
++    assert xml_str is not None
++    assert unicode_strs((pmc_id, xml_str))
++
++
++@pytest.mark.skip('PMC OA REST API is unstable')
+ def test_get_xml_invalid():
+     pmc_id = '123456789000'
+     xml_str = pmc_client.get_xml(pmc_id)
+@@ -99,6 +107,13 @@ def test_get_xml_invalid():
+ 
+ 
+ @pytest.mark.webservice
++def test_get_xml_invalid_s3():
++    pmc_id = 'PMC123456789000'
++    xml_str = pmc_client.get_xml_s3(pmc_id)
++    assert xml_str is None
++
++
++@pytest.mark.skip('PMC OA REST API is unstable')
+ def test_extract_text():
+     pmc_id = '4322985'
+     xml_str = pmc_client.get_xml(pmc_id)
+@@ -108,6 +123,16 @@ def test_extract_text():
+     assert unicode_strs(text)
+ 
+ 
++@pytest.mark.webservice
++def test_extract_text_s3():
++    pmc_id = 'PMC4322985'
++    xml_str = pmc_client.get_xml_s3(pmc_id)
++    text = pmc_client.extract_text(xml_str)
++    assert text is not None
++    assert 'RAS VS BRAF ONCOGENES AND TARGETED THERAPIES' in text
++    assert unicode_strs(text)
++
++
+ @pytest.mark.webservice
+ def test_extract_text2():
+     xml_str = '<article><body><p><p>some text</p>a</p></body></article>'
+diff --git a/indra/tests/test_rlimsp.py b/indra/tests/test_rlimsp.py
+index 209f3ffc87..4237a9e725 100644
+--- a/indra/tests/test_rlimsp.py
++++ b/indra/tests/test_rlimsp.py
+@@ -1,8 +1,6 @@
+ import os
+-import unittest
+ from indra.sources import rlimsp
+ 
+-@unittest.skip('RLIMS-P webservice is down')
+ def test_simple_usage():
+     rp = rlimsp.process_from_webservice('PMC3717945')
+     stmts = rp.statements
+@@ -15,7 +13,6 @@ def test_simple_usage():
+         assert 'trigger' in ev.annotations.keys()
+ 
+ 
+-@unittest.skip('RLIMS-P webservice is down')
+ def test_ungrounded_endpoint_with_pmids():
+     pmid_list = ['16403219', '22258404', '16961925', '22096607']
+     stmts = []

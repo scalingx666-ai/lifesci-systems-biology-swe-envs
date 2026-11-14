@@ -1,0 +1,387 @@
+diff --git a/databases/README.md b/databases/README.md
+index e4cb7156..2d6d07fc 100644
+--- a/databases/README.md
++++ b/databases/README.md
+@@ -10,7 +10,7 @@
+ 
+ ### k<sub>cat</sub> values from BRENDA
+ 
+-`kcat.tsv` collates kcat values per organism, reaction and substrate, as gathered from the BRENDA database. Both a per-triple maximum (`kcat_max`) and median (`kcat_median`) are recorded; `loadBRENDAdata` currently uses `kcat_max` only. Produced by the `geckopy brenda-refresh` CLI in the [geckopy](https://github.com/SysBioChalmers/geckopy) Python package, which maintains the actively updated BRENDA-parsing tooling for both toolboxes; `mw.tsv` and `sa.tsv` below come from the same tool and share its `#`-prefixed release-version header line.
++`kcat.tsv` collates kcat values per organism, reaction and substrate, as gathered from the BRENDA database. Both a per-triple maximum (`kcat_max`) and median (`kcat_median`) are recorded. Which one is used is set by `params.kcatAggregation` on the model adapter, or per call with `fuzzyKcatMatching(model,'kcatAggregation','median')`; the default is `max`. Produced by the `geckopy brenda-refresh` CLI in the [geckopy](https://github.com/SysBioChalmers/geckopy) Python package, which maintains the actively updated BRENDA-parsing tooling for both toolboxes; `mw.tsv` and `sa.tsv` below come from the same tool and share its `#`-prefixed release-version header line.
+ 
+ ### Molecular weights
+ 
+diff --git a/src/download_databases/loadBRENDAdata.m b/src/download_databases/loadBRENDAdata.m
+index 58fe1b44..6844ae25 100644
+--- a/src/download_databases/loadBRENDAdata.m
++++ b/src/download_databases/loadBRENDAdata.m
+@@ -8,14 +8,19 @@
+ % molecular weights).
+ %
+ % kcat.tsv and sa.tsv each carry both a max and a median aggregate per
+-% (EC, substrate, organism) triple; only the max column is used here. Each
+-% file starts with a `#`-prefixed release-version line followed by a
+-% tab-delimited column header, both skipped on read.
++% (EC, substrate, organism) triple; kcatAggregation selects which of the
++% two is read. Each file starts with a `#`-prefixed release-version line
++% followed by a tab-delimited column header, both skipped on read.
+ %
+ % Name-Value Arguments
+ % --------------------
+ % modelAdapter : ModelAdapter
+ %     a loaded model adapter (default: the current default model adapter).
++% kcatAggregation : char
++%     which aggregate to read from kcat.tsv and sa.tsv, 'max' or
++%     'median' (default: params.kcatAggregation from the model adapter,
++%     or 'max' if the adapter does not set it). A triple's max is the
++%     highest turnover reported for it; its median is the middle one.
+ %
+ % Returns
+ % -------
+@@ -29,14 +34,22 @@
+ %     % optional arguments may be given positionally or as name-value pairs:
+ %     [KCATcell, SAcell] = loadBRENDAdata();
+ %     [KCATcell, SAcell] = loadBRENDAdata('modelAdapter', adapter);
++%     [KCATcell, SAcell] = loadBRENDAdata('kcatAggregation', 'median');
+ %
+ % See also
+ % --------
+ % loadDatabases, getECfromDatabase
+ 
+ p = parseGECKOargs(varargin, { ...
+-    'modelAdapter', []});
+-modelAdapter = p.modelAdapter;
++    'modelAdapter',    [], @(x) assert(isempty(x) || isa(x,'ModelAdapter'), ...
++                                'loadBRENDAdata:invalidModelAdapter', ...
++                                'modelAdapter must be a ModelAdapter.'); ...
++    'kcatAggregation', [], @(x) assert(isempty(x) || any(strcmpi(x, ...
++                                {'max','median'})), ...
++                                'loadBRENDAdata:invalidKcatAggregation', ...
++                                'kcatAggregation must be ''max'' or ''median''.')});
++modelAdapter    = p.modelAdapter;
++kcatAggregation = p.kcatAggregation;
+ 
+ if isempty(modelAdapter)
+     modelAdapter = ModelAdapterManager.getDefault();
+@@ -45,6 +58,10 @@
+     end
+ end
+ 
++kcatAggregation = resolveKcatAggregation(kcatAggregation, modelAdapter);
++%Column 4 holds the per-triple maximum and column 5 the median.
++valueCol = 4 + strcmpi(kcatAggregation,'median');
++
+ basePath      = modelAdapter.getBrendaDBFolder();
+ KCAT_file      = fullfile(basePath,'kcat.tsv');
+ SA_file        = fullfile(basePath,'sa.tsv');
+@@ -52,12 +69,12 @@
+ 
+ %Extract BRENDA DATA from files information. kcat.tsv/sa.tsv are seven
+ %columns (ec_code, substrate, organism, value_max, value_median, n,
+-%references); the max column (4) is used. mw.tsv is six columns (no
++%references); valueCol picks max or median. mw.tsv is six columns (no
+ %substrate-level aggregation choice): ec_code, substrate, organism, value,
+ %n, references.
+-KCATcell      = openDataFile(KCAT_file,1,'%q %q %q %f %f %f %q',4);
++KCATcell      = openDataFile(KCAT_file,1,'%q %q %q %f %f %f %q',valueCol);
+ scalingFactor = 1/60;    %[umol/min/mg] -> [mmol/s/g]
+-SA            = openDataFile(SA_file,scalingFactor,'%q %q %q %f %f %f %q',4);
++SA            = openDataFile(SA_file,scalingFactor,'%q %q %q %f %f %f %q',valueCol);
+ scalingFactor = 1/1000;  %[g/mol] -> [g/mmol]
+ MW            = openDataFile(MW_file,scalingFactor,'%q %q %q %f %f %q',4);
+ 
+diff --git a/src/download_databases/resolveKcatAggregation.m b/src/download_databases/resolveKcatAggregation.m
+new file mode 100644
+index 00000000..9729e812
+--- /dev/null
++++ b/src/download_databases/resolveKcatAggregation.m
+@@ -0,0 +1,42 @@
++%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
++function kcatAggregation = resolveKcatAggregation(kcatAggregation, modelAdapter)
++% resolveKcatAggregation  Settle which BRENDA aggregate to read.
++%
++% The BRENDA snapshot records both a maximum and a median per
++% (EC, substrate, organism) triple. Which one a run uses can be given per
++% call, or once on the model adapter as params.kcatAggregation; an
++% adapter that sets neither gets 'max', which is what GECKO has always
++% used.
++%
++% Input Arguments
++% ---------------
++% kcatAggregation : char
++%     the per-call choice, or empty to fall back to the adapter.
++% modelAdapter : ModelAdapter
++%     a loaded model adapter.
++%
++% Returns
++% -------
++% kcatAggregation : char
++%     'max' or 'median'.
++%
++% See also
++% --------
++% loadBRENDAdata, fuzzyKcatMatching
++
++if isempty(kcatAggregation)
++    params = modelAdapter.getParameters();
++    if isfield(params,'kcatAggregation') && ~isempty(params.kcatAggregation)
++        kcatAggregation = params.kcatAggregation;
++    else
++        kcatAggregation = 'max';
++    end
++end
++
++if ~(ischar(kcatAggregation) || isstring(kcatAggregation)) || ...
++        ~any(strcmpi(kcatAggregation,{'max','median'}))
++    error('resolveKcatAggregation:invalidKcatAggregation', ...
++        'kcatAggregation must be ''max'' or ''median''.')
++end
++kcatAggregation = lower(char(kcatAggregation));
++end
+diff --git a/src/gather_kcats/fuzzyKcatMatching.m b/src/gather_kcats/fuzzyKcatMatching.m
+index 7e77c32c..9abbd23a 100644
+--- a/src/gather_kcats/fuzzyKcatMatching.m
++++ b/src/gather_kcats/fuzzyKcatMatching.m
+@@ -68,13 +68,30 @@
+ % --------
+ % mergeDLKcatAndFuzzyKcats, assignKcatValues
+ 
++% Validators reject a name that landed in a positional slot, which
++% happens when positional and name-value arguments are mixed. Without
++% them `while forceWClvl > 0` on a char array is all-true and silently
++% wildcards every EC number.
+ p = parseGECKOargs(varargin, { ...
+-    'ecRxns',       []; ...
+-    'modelAdapter', []; ...
+-    'forceWClvl',   []});
+-ecRxns       = p.ecRxns;
+-modelAdapter = p.modelAdapter;
+-forceWClvl   = p.forceWClvl;
++    'ecRxns',          [], @(x) assert(isempty(x) || isnumeric(x) || ...
++                                islogical(x), ...
++                                'fuzzyKcatMatching:invalidEcRxns', ...
++                                'ecRxns must be numeric or logical.'); ...
++    'modelAdapter',    [], @(x) assert(isempty(x) || isa(x,'ModelAdapter'), ...
++                                'fuzzyKcatMatching:invalidModelAdapter', ...
++                                'modelAdapter must be a ModelAdapter.'); ...
++    'forceWClvl',      [], @(x) assert(isempty(x) || (isnumeric(x) && ...
++                                isscalar(x) && x >= 0), ...
++                                'fuzzyKcatMatching:invalidForceWClvl', ...
++                                'forceWClvl must be a nonnegative scalar.'); ...
++    'kcatAggregation', [], @(x) assert(isempty(x) || any(strcmpi(x, ...
++                                {'max','median'})), ...
++                                'fuzzyKcatMatching:invalidKcatAggregation', ...
++                                'kcatAggregation must be ''max'' or ''median''.')});
++ecRxns          = p.ecRxns;
++modelAdapter    = p.modelAdapter;
++forceWClvl      = p.forceWClvl;
++kcatAggregation = p.kcatAggregation;
+ 
+ if isempty(ecRxns)
+     ecRxns = true(numel(model.ec.rxns),1);
+@@ -118,7 +135,9 @@
+ end
+ 
+ %Load BRENDA data:
+-[KCATcell, SAcell] = loadBRENDAdata(modelAdapter);
++kcatAggregation = resolveKcatAggregation(kcatAggregation, modelAdapter);
++[KCATcell, SAcell] = loadBRENDAdata('modelAdapter', modelAdapter, ...
++    'kcatAggregation', kcatAggregation);
+ 
+ %Creates a Structure with KEGG codes for organisms, names and taxonomical
+ %distance matrix and extract the organism index in the KEGG struct
+@@ -196,7 +215,7 @@
+         if ~isempty(substrates{i})
+             [kcats(i), kcatInfo.info,kcatInfo.stats] = iterativeMatch(EC,substrates{i},substrCoeffs{i},i,KCATcell,...
+                 kcatInfo.info,kcatInfo.stats,org_name,...
+-                phylDistStruct,org_index,SAcell,ECIndexIds,EcIndexIndices);
++                phylDistStruct,org_index,SAcell,ECIndexIds,EcIndexIndices,kcatAggregation);
+         end
+     end
+ end
+@@ -217,7 +236,7 @@
+ end
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ function [kcat,dir,tot] =iterativeMatch(EC,subs,substrCoeff,i,KCATcell,dir,tot,...
+-    name,phylDist,org_index,SAcell,ECIndexIds,EcIndexIndices)
++    name,phylDist,org_index,SAcell,ECIndexIds,EcIndexIndices,kcatAggregation)
+ %Will iteratively try to match the EC number to some registry in BRENDA,
+ %using each time one additional wildcard.
+ 
+@@ -231,7 +250,7 @@
+         %Atempt match:
+         [kcat(k),origin(k),matches(k)] = mainMatch(EC{k},subs,substrCoeff,KCATcell,...
+             name,phylDist,...
+-            org_index,SAcell,ECIndexIds,EcIndexIndices);
++            org_index,SAcell,ECIndexIds,EcIndexIndices,kcatAggregation);
+         %If any match found, ends. If not, introduces one extra wild card and
+         %tries again:
+         if origin(k) > 0
+@@ -298,7 +317,7 @@
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ 
+ function [kcat,origin,matches] = mainMatch(EC,subs,substrCoeff,KCATcell,...
+-    name,phylDist,org_index,SAcell,ECIndexIds,EcIndexIndices)
++    name,phylDist,org_index,SAcell,ECIndexIds,EcIndexIndices,kcatAggregation)
+ 
+ %First make the string matching. This takes time, so we only want to do
+ %this once:
+@@ -317,19 +336,19 @@
+ origin = 0;
+ %First try to match organism and substrate:
+ [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,name,true,false,...
+-    phylDist,org_index,SAcell,stringMatchesEC_cell,[]);
++    phylDist,org_index,SAcell,stringMatchesEC_cell,[],kcatAggregation);
+ if matches > 0 && ~wild % If wildcard, ignore substrate match
+     origin = 1;
+     %If no match, try the closest organism but match the substrate:
+ else
+     [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,'',true,false,...
+-        phylDist,org_index,SAcell,stringMatchesEC_cell,[]);
++        phylDist,org_index,SAcell,stringMatchesEC_cell,[],kcatAggregation);
+     if matches > 0 && ~wild % If wildcard, ignore substrate match
+         origin = 2;
+         %If no match, try to match organism but with any substrate:
+     else
+         [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,name,false,false,...
+-            phylDist,org_index,SAcell,stringMatchesEC_cell,[]);
++            phylDist,org_index,SAcell,stringMatchesEC_cell,[],kcatAggregation);
+         if matches > 0
+             origin = 3;
+             %If no match, try to match organism but for any substrate (SA*MW):
+@@ -339,21 +358,21 @@
+ 
+             [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,name,false,...
+                 true,phylDist,org_index,...
+-                SAcell,stringMatchesEC_cell,stringMatchesSA);
++                SAcell,stringMatchesEC_cell,stringMatchesSA,kcatAggregation);
+             if matches > 0
+                 origin = 4;
+                 %If no match, try any organism and any substrate:
+             else
+                 [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,'',false,...
+                     false,phylDist,...
+-                    org_index,SAcell,stringMatchesEC_cell,stringMatchesSA);
++                    org_index,SAcell,stringMatchesEC_cell,stringMatchesSA,kcatAggregation);
+                 if matches > 0
+                     origin = 5;
+                     %Again if no match, look for any org and SA*MW
+                 else
+                     [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,'',...
+                         false,true,phylDist,...
+-                        org_index,SAcell,stringMatchesEC_cell,stringMatchesSA);
++                        org_index,SAcell,stringMatchesEC_cell,stringMatchesSA,kcatAggregation);
+                     if matches > 0
+                         origin = 6;
+                     end
+@@ -367,7 +386,7 @@
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+ function [kcat,matches] = matchKcat(EC,subs,substrCoeff,KCATcell,organism,...
+     substrate,SA,phylDist,...
+-    org_index,SAcell,KCATcellMatches,SAcellMatches)
++    org_index,SAcell,KCATcellMatches,SAcellMatches,kcatAggregation)
+ 
+ %Will go through BRENDA and will record any match. Afterwards, it will
+ %return the maximum value and the number of matches attained.
+@@ -409,12 +428,16 @@
+         kcat = KCATcell{4}(EC_indexes);
+     end
+ end
+-%Return maximum value:
++%Collapse the matched entries to one value, by the chosen aggregation:
+ if isempty(kcat)
+     kcat = 0;
+ else
+-    matches        = length(kcat);
+-    [kcat,MaxIndx] = max(kcat);
++    matches = length(kcat);
++    if strcmpi(kcatAggregation,'median')
++        kcat = median(kcat);
++    else
++        kcat = max(kcat);
++    end
+ end
+ %Avoid SA*Mw values over the diffusion limit rate  [Bar-Even et al. 2011]
+ if kcat>(1E7)
+diff --git a/src/model_adapter/adapterTemplate.m b/src/model_adapter/adapterTemplate.m
+index 3d0c8c3b..28cc98dd 100644
+--- a/src/model_adapter/adapterTemplate.m
++++ b/src/model_adapter/adapterTemplate.m
+@@ -43,6 +43,13 @@
+ 
+ 			% Provide your organism scientific name
+ 			obj.params.org_name = 'genus species';
++
++            % Which BRENDA aggregate fuzzyKcatMatching reads for each
++            % (EC, substrate, organism) triple: 'max' (the highest
++            % turnover reported) or 'median' (the middle one). Can also
++            % be given per call as
++            % fuzzyKcatMatching(model,'kcatAggregation','median').
++            obj.params.kcatAggregation = 'max';
+             
+             % Taxonomic identifier for Complex Portal
+             obj.params.complex.taxonomicID = [];
+diff --git a/test/unit_tests/ecTestGEM/data/kcat.tsv b/test/unit_tests/ecTestGEM/data/kcat.tsv
+index d2b96bd1..818f6068 100644
+--- a/test/unit_tests/ecTestGEM/data/kcat.tsv
++++ b/test/unit_tests/ecTestGEM/data/kcat.tsv
+@@ -1,5 +1,5 @@
+ # BRENDA release test-fixture - kcat in 1/s
+ ec_code	substrate	organism	kcat_max	kcat_median	n	references
+-1.1.1.1	m1	testus testus	1	1	1	*
+-1.1.1.1	m2	testus falsus	10	10	1	*
+-1.1.2.2	m1	testus testus	100	100	1	*
++1.1.1.1	m1	testus testus	1	0.5	2	*
++1.1.1.1	m2	testus falsus	10	4	2	*
++1.1.2.2	m1	testus testus	100	40	2	*
+diff --git a/test/unit_tests/geckoCoreFunctionTests.m b/test/unit_tests/geckoCoreFunctionTests.m
+index 4e8d1558..1a5ba345 100644
+--- a/test/unit_tests/geckoCoreFunctionTests.m
++++ b/test/unit_tests/geckoCoreFunctionTests.m
+@@ -249,6 +249,46 @@ function testsaveECModel_tc0009(testCase)
+     verifyEqual(testCase, model, loadedModel)
+ end
+ 
++function testfuzzyKcatMatchingMedian_tc0060(testCase)
++    % Verifies that kcatAggregation selects which BRENDA aggregate is used.
++    % The fixture records a different median from the max for every triple,
++    % so a median run must return the median column throughout, while the
++    % matching itself -- which triple is chosen, at which wildcard level and
++    % origin -- is unchanged.
++    geckoPath = findGECKOroot;
++    adapter = ModelAdapterManager.getAdapter(fullfile(geckoPath,'test','unit_tests','ecTestGEM', 'TestGEMAdapter.m'));
++    model = getGeckoTestModel();
++    ecModel = makeEcModel(model, false, adapter);
++    ecModel = getECfromGEM(ecModel);
++
++    kcatListMax = fuzzyKcatMatching(ecModel, [], adapter);
++    verifyEqual(testCase, kcatListMax.kcats, [1;1;10;10;100;1])
++
++    kcatListMedian = fuzzyKcatMatching(ecModel, 'ecRxns', [], ...
++        'modelAdapter', adapter, 'kcatAggregation', 'median');
++    verifyEqual(testCase, kcatListMedian.kcats, [0.5;0.5;4;4;40;0.5])
++
++    % Only the values change; the matching does not.
++    verifyEqual(testCase, kcatListMedian.rxns, kcatListMax.rxns)
++    verifyEqual(testCase, kcatListMedian.eccodes, kcatListMax.eccodes)
++    verifyEqual(testCase, kcatListMedian.wildcardLvl, kcatListMax.wildcardLvl)
++    verifyEqual(testCase, kcatListMedian.origin, kcatListMax.origin)
++
++    % 'max' is the default, and an unknown value is refused.
++    kcatListExplicitMax = fuzzyKcatMatching(ecModel, 'ecRxns', [], ...
++        'modelAdapter', adapter, 'kcatAggregation', 'max');
++    verifyEqual(testCase, kcatListExplicitMax.kcats, kcatListMax.kcats)
++    verifyError(testCase, @() fuzzyKcatMatching(ecModel, 'ecRxns', [], ...
++        'modelAdapter', adapter, 'kcatAggregation', 'mean'), ...
++        'fuzzyKcatMatching:invalidKcatAggregation')
++
++    % Mixing positional and name-value arguments puts a name where a
++    % value belongs; that has to fail rather than quietly wildcard every
++    % EC number, which is what an unvalidated forceWClvl would do.
++    verifyError(testCase, @() fuzzyKcatMatching(ecModel, [], adapter, ...
++        'kcatAggregation', 'median'), 'fuzzyKcatMatching:invalidForceWClvl')
++end
++
+ function testfuzzyKcatMatching_tc0010(testCase)
+     % Verifies fuzzyKcatMatching against ecTestGEM's fixture BRENDA data, for
+     % both the full and light ecModel variants and for both the complete

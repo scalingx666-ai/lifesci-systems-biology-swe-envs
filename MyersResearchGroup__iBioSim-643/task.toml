@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/MyersResearchGroup__iBioSim-643"
+description = "Fix issues with model generation libraries"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "iBioSim",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "MyersResearchGroup/iBioSim"
+ref = "d4d40a9084ebdea73f2b2ba7c34e36a0cd7c75be"
+reference = "https://github.com/MyersResearchGroup/iBioSim/pull/643"
+source_access = "auto"
+built_at = "2026-11-14T07:02:45.255287+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:b68fa05f3c0b1cc8748e6ff9a1ea645c336ae286f138e42b30f94c6b2556ac0c"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-12-23T17:00:18Z"
+diff_format = "unified"
+context_files = [
+    "conversion/pom.xml",
+    "gui/pom.xml",
+    "gui/src/main/java/edu/utah/ece/async/ibiosim/gui/Gui.java",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 77
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

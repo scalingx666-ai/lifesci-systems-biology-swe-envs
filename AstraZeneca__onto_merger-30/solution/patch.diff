@@ -1,0 +1,22 @@
+diff --git a/onto_merger/data/data_manager.py b/onto_merger/data/data_manager.py
+index 045d453..c93f3ca 100644
+--- a/onto_merger/data/data_manager.py
++++ b/onto_merger/data/data_manager.py
+@@ -5,7 +5,7 @@
+ import shutil
+ import typing
+ from pathlib import Path
+-from typing import List, Union
++from typing import Dict, List, Union
+ 
+ import pandas as pd
+ from pandas import DataFrame
+@@ -202,7 +202,7 @@ def load_specified_tables(self, table_names: List[str]) -> List[NamedTable]:
+     def load_analysis_report_table_as_dict(self,
+                                            section_name: str,
+                                            table_name: str,
+-                                           rename_columns: Union[None, dict[str, str]] = None) -> List[dict]:
++                                           rename_columns: Union[None, Dict[str, str]] = None) -> List[dict]:
+         """Load a CSV table as a list of dictionaries.
+ 
+         :param section_name: The name of the report section (prefix of the file).

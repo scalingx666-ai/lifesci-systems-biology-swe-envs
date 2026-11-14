@@ -1,0 +1,2933 @@
+diff --git a/refactor_pretrain/Logger.py b/refactor_pretrain/Logger.py
+new file mode 100644
+index 0000000..7444cf0
+--- /dev/null
++++ b/refactor_pretrain/Logger.py
+@@ -0,0 +1,196 @@
++"""
++    Code here is borrowed from the https://github.com/facebookresearch/deit/blob/main/utils.py
++    This file includes two classes SmoothValue and MetricLoggers that are directly copied from the link above
++    TODO: 
++    print_important_info and print_warning_info are new
++    move these classes and the new functions to a utils.py file
++"""
++
++
++from collections import defaultdict, deque
++import torch
++from distribute_utils import is_dist_avail_and_initialized
++import torch.distributed as dist
++import datetime
++import os
++import time
++
++class SmoothedValue(object):
++    """Track a series of values and provide access to smoothed values over a
++    window or the global series average.
++    """
++
++    def __init__(self, window_size=20, fmt=None):
++        if fmt is None:
++            fmt = "{median:.4f} ({global_avg:.4f})"
++        self.deque = deque(maxlen=window_size)
++        self.total = 0.0
++        self.count = 0
++        self.fmt = fmt
++
++    def update(self, value, n=1):
++        self.deque.append(value)
++        self.count += n
++        self.total += value * n
++
++    def synchronize_between_processes(self):
++        """
++        Warning: does not synchronize the deque!
++        """
++        if not is_dist_avail_and_initialized():
++            return
++        t = torch.tensor([self.count, self.total], dtype=torch.float64, device='cuda')
++        dist.barrier()
++        dist.all_reduce(t)
++        t = t.tolist()
++        self.count = int(t[0])
++        self.total = t[1]
++
++    @property
++    def median(self):
++        d = torch.tensor(list(self.deque))
++        return d.median().item()
++
++    @property
++    def avg(self):
++        d = torch.tensor(list(self.deque), dtype=torch.float32)
++        return d.mean().item()
++
++    @property
++    def global_avg(self):
++        return self.total / self.count
++
++    @property
++    def max(self):
++        return max(self.deque)
++
++    @property
++    def value(self):
++        return self.deque[-1]
++
++    def __str__(self):
++        return self.fmt.format(
++            median=self.median,
++            avg=self.avg,
++            global_avg=self.global_avg,
++            max=self.max,
++            value=self.value)
++
++
++class MetricLogger(object):
++    def __init__(self, delimiter="\t"):
++        self.meters = defaultdict(SmoothedValue)
++        self.delimiter = delimiter
++
++    def update(self, **kwargs):
++        for k, v in kwargs.items():
++            if v is None:
++                continue
++            if isinstance(v, torch.Tensor):
++                v = v.item()
++            assert isinstance(v, (float, int))
++            self.meters[k].update(v)
++
++    def __getattr__(self, attr):
++        if attr in self.meters:
++            return self.meters[attr]
++        if attr in self.__dict__:
++            return self.__dict__[attr]
++        raise AttributeError("'{}' object has no attribute '{}'".format(
++            type(self).__name__, attr))
++
++    def __str__(self):
++        loss_str = []
++        for name, meter in self.meters.items():
++            loss_str.append(
++                "{}: {}".format(name, str(meter))
++            )
++        return self.delimiter.join(loss_str)
++
++    def synchronize_between_processes(self):
++        for meter in self.meters.values():
++            meter.synchronize_between_processes()
++
++    def add_meter(self, name, meter):
++        self.meters[name] = meter
++    def log(self,iteration,print_freq,header=None):
++        if iteration % print_freq == 0:
++            return
++
++        if not header:
++            header = ''
++        #space_fmt = ':' + str(iteration) + 'd'
++        log_msg = [
++            header,
++            '['+str(iteration)+']',
++            '{meters}',
++        ]
++        if torch.cuda.is_available():
++            log_msg.append('max mem: {memory:.0f}')
++        MB = 1024.0 * 1024.0
++        log_msg = self.delimiter.join(log_msg)
++        if torch.cuda.is_available():
++            print(log_msg.format(
++                iteration,
++                meters=str(self),
++                memory=torch.cuda.max_memory_allocated() / MB))
++        else:
++            print(log_msg.format(
++                iteration,
++                meters=str(self)))
++    def log_every(self, iterable, print_freq, header=None):
++        i = 0
++        if not header:
++            header = ''
++        start_time = time.time()
++        end = time.time()
++        iter_time = SmoothedValue(fmt='{avg:.4f}')
++        data_time = SmoothedValue(fmt='{avg:.4f}')
++        space_fmt = ':' + str(len(str(len(iterable)))) + 'd'
++        log_msg = [
++            header,
++            '[{0' + space_fmt + '}/{1}]',
++            'eta: {eta}',
++            '{meters}',
++            'time: {time}',
++            'data: {data}'
++        ]
++        if torch.cuda.is_available():
++            log_msg.append('max mem: {memory:.0f}')
++        log_msg = self.delimiter.join(log_msg)
++        MB = 1024.0 * 1024.0
++        for obj in iterable:
++            data_time.update(time.time() - end)
++            yield obj
++            iter_time.update(time.time() - end)
++            if i % print_freq == 0 or i == len(iterable) - 1:
++                eta_seconds = iter_time.global_avg * (len(iterable) - i)
++                eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
++                if torch.cuda.is_available():
++                    print(log_msg.format(
++                        i, len(iterable), eta=eta_string,
++                        meters=str(self),
++                        time=str(iter_time), data=str(data_time),
++                        memory=torch.cuda.max_memory_allocated() / MB),flush=True)
++                else:
++                    print(log_msg.format(
++                        i, len(iterable), eta=eta_string,
++                        meters=str(self),
++                        time=str(iter_time), data=str(data_time)),flush=True)
++            i += 1
++            end = time.time()
++        total_time = time.time() - start_time
++        total_time_str = str(datetime.timedelta(seconds=int(total_time)))
++        print('{} Total time: {} ({:.4f} s / it)'.format(
++            header, total_time_str, total_time / len(iterable)),flush=True)
++
++
++def print_important_info(str):
++    print("="*50)
++    print("Important:"+str)
++    print("="*50)
++
++def print_warning_info(str):
++    print("*"*50)
++    print("Warning:"+str)
++    print("*"*50)
+\ No newline at end of file
+diff --git a/refactor_pretrain/SSIM.py b/refactor_pretrain/SSIM.py
+new file mode 100644
+index 0000000..f4e64d5
+--- /dev/null
++++ b/refactor_pretrain/SSIM.py
+@@ -0,0 +1,333 @@
++#code from https://github.com/VainF/pytorch-msssim
++# Copyright 2020 by Gongfan Fang, Zhejiang University.
++# All rights reserved.
++
++# TODO: We should remove this file altogether and import the original implementation instead. Its virtually identical. 
++
++import warnings
++from typing import List, Optional, Tuple, Union
++
++import torch
++import torch.nn.functional as F
++from torch import Tensor
++
++
++def _fspecial_gauss_1d(size: int, sigma: float) -> Tensor:
++    r"""Create 1-D gauss kernel
++    Args:
++        size (int): the size of gauss kernel
++        sigma (float): sigma of normal distribution
++    Returns:
++        torch.Tensor: 1D kernel (1 x 1 x size)
++    """
++    coords = torch.arange(size, dtype=torch.float)
++    coords -= size // 2
++
++    g = torch.exp(-(coords ** 2) / (2 * sigma ** 2))
++    g /= g.sum()
++
++    return g.unsqueeze(0).unsqueeze(0)
++
++
++def gaussian_filter(input: Tensor, win: Tensor) -> Tensor:
++    r""" Blur input with 1-D kernel
++    Args:
++        input (torch.Tensor): a batch of tensors to be blurred
++        window (torch.Tensor): 1-D gauss kernel
++    Returns:
++        torch.Tensor: blurred tensors
++    """
++    assert all([ws == 1 for ws in win.shape[1:-1]]), win.shape
++    if len(input.shape) == 4:
++        conv = F.conv2d
++    elif len(input.shape) == 5:
++        conv = F.conv3d
++    else:
++        raise NotImplementedError(input.shape)
++
++    C = input.shape[1]
++    out = input
++    for i, s in enumerate(input.shape[2:]):
++        if s >= win.shape[-1]:
++            out = conv(out, weight=win.transpose(2 + i, -1), stride=1, padding=0, groups=C)
++        else:
++            warnings.warn(
++                f"Skipping Gaussian Smoothing at dimension 2+{i} for input: {input.shape} and win size: {win.shape[-1]}"
++            )
++
++    return out
++
++
++def _ssim(
++    X: Tensor,
++    Y: Tensor,
++    data_range: float,
++    win: Tensor,
++    size_average: bool = True,
++    K: Union[Tuple[float, float], List[float]] = (0.01, 0.03)
++) -> Tuple[Tensor, Tensor]:
++    r""" Calculate ssim index for X and Y
++
++    Args:
++        X (torch.Tensor): images
++        Y (torch.Tensor): images
++        data_range (float or int): value range of input images. (usually 1.0 or 255)
++        win (torch.Tensor): 1-D gauss kernel
++        size_average (bool, optional): if size_average=True, ssim of all images will be averaged as a scalar
++
++    Returns:
++        Tuple[torch.Tensor, torch.Tensor]: ssim results.
++    """
++    K1, K2 = K
++    # batch, channel, [depth,] height, width = X.shape
++    compensation = 1.0
++
++    C1 = (K1 * data_range) ** 2
++    C2 = (K2 * data_range) ** 2
++
++    win = win.to(X.device, dtype=X.dtype)
++
++    mu1 = gaussian_filter(X, win)
++    mu2 = gaussian_filter(Y, win)
++
++    mu1_sq = mu1.pow(2)
++    mu2_sq = mu2.pow(2)
++    mu1_mu2 = mu1 * mu2
++
++    sigma1_sq = compensation * (gaussian_filter(X * X, win) - mu1_sq)
++    sigma2_sq = compensation * (gaussian_filter(Y * Y, win) - mu2_sq)
++    sigma12 = compensation * (gaussian_filter(X * Y, win) - mu1_mu2)
++
++    cs_map = (2 * sigma12 + C2) / (sigma1_sq + sigma2_sq + C2)  # set alpha=beta=gamma=1
++    ssim_map = ((2 * mu1_mu2 + C1) / (mu1_sq + mu2_sq + C1)) * cs_map
++
++    ssim_per_channel = torch.flatten(ssim_map, 2).mean(-1)
++    cs = torch.flatten(cs_map, 2).mean(-1)
++    return ssim_per_channel, cs
++
++
++def ssim(
++    X: Tensor,
++    Y: Tensor,
++    data_range: float = 255,
++    size_average: bool = True,
++    win_size: int = 11,
++    win_sigma: float = 1.5,
++    win: Optional[Tensor] = None,
++    K: Union[Tuple[float, float], List[float]] = (0.01, 0.03),
++    nonnegative_ssim: bool = False,
++) -> Tensor:
++    r""" interface of ssim
++    Args:
++        X (torch.Tensor): a batch of images, (N,C,H,W)
++        Y (torch.Tensor): a batch of images, (N,C,H,W)
++        data_range (float or int, optional): value range of input images. (usually 1.0 or 255)
++        size_average (bool, optional): if size_average=True, ssim of all images will be averaged as a scalar
++        win_size: (int, optional): the size of gauss kernel
++        win_sigma: (float, optional): sigma of normal distribution
++        win (torch.Tensor, optional): 1-D gauss kernel. if None, a new kernel will be created according to win_size and win_sigma
++        K (list or tuple, optional): scalar constants (K1, K2). Try a larger K2 constant (e.g. 0.4) if you get a negative or NaN results.
++        nonnegative_ssim (bool, optional): force the ssim response to be nonnegative with relu
++
++    Returns:
++        torch.Tensor: ssim results
++    """
++    if not X.shape == Y.shape:
++        raise ValueError(f"Input images should have the same dimensions, but got {X.shape} and {Y.shape}.")
++
++    for d in range(len(X.shape) - 1, 1, -1):
++        X = X.squeeze(dim=d)
++        Y = Y.squeeze(dim=d)
++
++    if len(X.shape) not in (4, 5):
++        raise ValueError(f"Input images should be 4-d or 5-d tensors, but got {X.shape}")
++
++    #if not X.type() == Y.type():
++    #    raise ValueError(f"Input images should have the same dtype, but got {X.type()} and {Y.type()}.")
++
++    if win is not None:  # set win_size
++        win_size = win.shape[-1]
++
++    if not (win_size % 2 == 1):
++        raise ValueError("Window size should be odd.")
++
++    if win is None:
++        win = _fspecial_gauss_1d(win_size, win_sigma)
++        win = win.repeat([X.shape[1]] + [1] * (len(X.shape) - 1))
++
++    ssim_per_channel, cs = _ssim(X, Y, data_range=data_range, win=win, size_average=False, K=K)
++    if nonnegative_ssim:
++        ssim_per_channel = torch.relu(ssim_per_channel)
++
++    if size_average:
++        return ssim_per_channel.mean()
++    else:
++        return ssim_per_channel.mean(1)
++
++
++def ms_ssim(
++    X: Tensor,
++    Y: Tensor,
++    data_range: float = 255,
++    size_average: bool = True,
++    win_size: int = 11,
++    win_sigma: float = 1.5,
++    win: Optional[Tensor] = None,
++    weights: Optional[List[float]] = None,
++    K: Union[Tuple[float, float], List[float]] = (0.01, 0.03)
++) -> Tensor:
++    r""" interface of ms-ssim
++    Args:
++        X (torch.Tensor): a batch of images, (N,C,[T,]H,W)
++        Y (torch.Tensor): a batch of images, (N,C,[T,]H,W)
++        data_range (float or int, optional): value range of input images. (usually 1.0 or 255)
++        size_average (bool, optional): if size_average=True, ssim of all images will be averaged as a scalar
++        win_size: (int, optional): the size of gauss kernel
++        win_sigma: (float, optional): sigma of normal distribution
++        win (torch.Tensor, optional): 1-D gauss kernel. if None, a new kernel will be created according to win_size and win_sigma
++        weights (list, optional): weights for different levels
++        K (list or tuple, optional): scalar constants (K1, K2). Try a larger K2 constant (e.g. 0.4) if you get a negative or NaN results.
++    Returns:
++        torch.Tensor: ms-ssim results
++    """
++    if not X.shape == Y.shape:
++        raise ValueError(f"Input images should have the same dimensions, but got {X.shape} and {Y.shape}.")
++
++    for d in range(len(X.shape) - 1, 1, -1):
++        X = X.squeeze(dim=d)
++        Y = Y.squeeze(dim=d)
++
++    #if not X.type() == Y.type():
++    #    raise ValueError(f"Input images should have the same dtype, but got {X.type()} and {Y.type()}.")
++
++    if len(X.shape) == 4:
++        avg_pool = F.avg_pool2d
++    elif len(X.shape) == 5:
++        avg_pool = F.avg_pool3d
++    else:
++        raise ValueError(f"Input images should be 4-d or 5-d tensors, but got {X.shape}")
++
++    if win is not None:  # set win_size
++        win_size = win.shape[-1]
++
++    if not (win_size % 2 == 1):
++        raise ValueError("Window size should be odd.")
++
++    smaller_side = min(X.shape[-2:])
++    assert smaller_side > (win_size - 1) * (
++        2 ** 4
++    ), "Image size should be larger than %d due to the 4 downsamplings in ms-ssim" % ((win_size - 1) * (2 ** 4))
++
++    if weights is None:
++        weights = [0.0448, 0.2856, 0.3001, 0.2363, 0.1333]
++    weights_tensor = X.new_tensor(weights)
++
++    if win is None:
++        win = _fspecial_gauss_1d(win_size, win_sigma)
++        win = win.repeat([X.shape[1]] + [1] * (len(X.shape) - 1))
++
++    levels = weights_tensor.shape[0]
++    mcs = []
++    for i in range(levels):
++        ssim_per_channel, cs = _ssim(X, Y, win=win, data_range=data_range, size_average=False, K=K)
++
++        if i < levels - 1:
++            mcs.append(torch.relu(cs))
++            padding = [s % 2 for s in X.shape[2:]]
++            X = avg_pool(X, kernel_size=2, padding=padding)
++            Y = avg_pool(Y, kernel_size=2, padding=padding)
++
++    ssim_per_channel = torch.relu(ssim_per_channel)  # type: ignore  # (batch, channel)
++    mcs_and_ssim = torch.stack(mcs + [ssim_per_channel], dim=0)  # (level, batch, channel)
++    ms_ssim_val = torch.prod(mcs_and_ssim ** weights_tensor.view(-1, 1, 1), dim=0)
++
++    if size_average:
++        return ms_ssim_val.mean()
++    else:
++        return ms_ssim_val.mean(1)
++
++
++class SSIM(torch.nn.Module):
++    def __init__(
++        self,
++        data_range: float = 255,
++        size_average: bool = True,
++        win_size: int = 11,
++        win_sigma: float = 1.5,
++        channel: int = 3,
++        spatial_dims: int = 2,
++        K: Union[Tuple[float, float], List[float]] = (0.01, 0.03),
++        nonnegative_ssim: bool = False,
++    ) -> None:
++        r""" class for ssim
++        Args:
++            data_range (float or int, optional): value range of input images. (usually 1.0 or 255)
++            size_average (bool, optional): if size_average=True, ssim of all images will be averaged as a scalar
++            win_size: (int, optional): the size of gauss kernel
++            win_sigma: (float, optional): sigma of normal distribution
++            channel (int, optional): input channels (default: 3)
++            K (list or tuple, optional): scalar constants (K1, K2). Try a larger K2 constant (e.g. 0.4) if you get a negative or NaN results.
++            nonnegative_ssim (bool, optional): force the ssim response to be nonnegative with relu.
++        """
++
++        super(SSIM, self).__init__()
++        self.win_size = win_size
++        self.win = _fspecial_gauss_1d(win_size, win_sigma).repeat([channel, 1] + [1] * spatial_dims)
++        self.size_average = size_average
++        self.data_range = data_range
++        self.K = K
++        self.nonnegative_ssim = nonnegative_ssim
++
++    def forward(self, X: Tensor, Y: Tensor) -> Tensor:
++        return ssim(
++            X,
++            Y,
++            data_range=self.data_range,
++            size_average=self.size_average,
++            win=self.win,
++            K=self.K,
++            nonnegative_ssim=self.nonnegative_ssim,
++        )
++
++
++class MS_SSIM(torch.nn.Module):
++    def __init__(
++        self,
++        data_range: float = 255,
++        size_average: bool = True,
++        win_size: int = 11,
++        win_sigma: float = 1.5,
++        channel: int = 3,
++        spatial_dims: int = 2,
++        weights: Optional[List[float]] = None,
++        K: Union[Tuple[float, float], List[float]] = (0.01, 0.03),
++    ) -> None:
++        r""" class for ms-ssim
++        Args:
++            data_range (float or int, optional): value range of input images. (usually 1.0 or 255)
++            size_average (bool, optional): if size_average=True, ssim of all images will be averaged as a scalar
++            win_size: (int, optional): the size of gauss kernel
++            win_sigma: (float, optional): sigma of normal distribution
++            channel (int, optional): input channels (default: 3)
++            weights (list, optional): weights for different levels
++            K (list or tuple, optional): scalar constants (K1, K2). Try a larger K2 constant (e.g. 0.4) if you get a negative or NaN results.
++        """
++
++        super(MS_SSIM, self).__init__()
++        self.win_size = win_size
++        self.win = _fspecial_gauss_1d(win_size, win_sigma).repeat([channel, 1] + [1] * spatial_dims)
++        self.size_average = size_average
++        self.data_range = data_range
++        self.weights = weights
++        self.K = K
++
++    def forward(self, X: Tensor, Y: Tensor) -> Tensor:
++        return ms_ssim(
++            X,
++            Y,
++            data_range=self.data_range,
++            size_average=self.size_average,
++            win=self.win,
++            weights=self.weights,
++            K=self.K,
++        )
+\ No newline at end of file
+diff --git a/refactor_pretrain/argparser.py b/refactor_pretrain/argparser.py
+new file mode 100644
+index 0000000..063a0b3
+--- /dev/null
++++ b/refactor_pretrain/argparser.py
+@@ -0,0 +1,211 @@
++import argparse
++
++def argparser_infer():
++    parser = argparse.ArgumentParser('HiCFoundation inference', add_help=False)
++    parser.add_argument('--batch_size', default=128, type=int,
++                        help='Batch size of the input')
++    # Dataset parameters
++    parser.add_argument('--input', type=str, help='a .hic/.cool/.pkl/.txt/.pairs/.npy file records Hi-C/scHi-C matrix')
++    parser.add_argument('--resolution', default=10000, type=int,help='resolution of the input matrix')
++    parser.add_argument("--task",default=0,type=int,help="1: Reproducibility analysis; \n 2: Loop calling; \n \
++                        3: Resolution enhancement; \n 4: Epigenomic assay prediction; \n 5: scHi-C enhancement")
++    
++    parser.add_argument('--input_row_size', default=224, type=int,
++                        help='input submatrix row size')
++    parser.add_argument("--input_col_size",default=4000,type=int,help="input submatrix column size")
++    parser.add_argument("--patch_size",default=16,type=int,help="patch size for the input submatrix")
++
++    parser.add_argument('--stride', default=20, type=int,
++                        help='scanning stride for the input Hi-C matrix')
++    parser.add_argument("--bound",default=200,type=int,help="off-diagonal bound for the scanning")
++    parser.add_argument('--num_workers', default=8, type=int,help="data loading workers per GPU")
++    parser.add_argument('--model', default='vit_large_patch16', type=str, metavar='MODEL',
++                        help='Name of model to train')
++    parser.add_argument("--model_path",default='',help='load fine-tuned model for inference')
++    parser.add_argument('--output', default='hicfoundation_inference',help='output directory to save the results')
++    parser.add_argument("--print_freq",default=1,type=int,
++                        help="log frequency for output log during inference")
++    parser.add_argument("--gpu",default=None,type=str,help="which gpu to use")
++    parser.add_argument("--genome_id",type=str,default="hg38", help="genome id for generating .hic file. \n \
++                        Must be one of hg18, hg19, hg38, dMel, mm9, mm10, anasPlat1, bTaurus3, canFam3, equCab2, \
++                        galGal4, Pf3D7, sacCer3, sCerS288c, susScr3, or TAIR10; \n \
++                         alternatively, this can be the path of the chrom.sizes file that lists on each line the name and size of the chromosomes.")
++    parser.add_argument("--embed_depth",default=0,type=int,help="0: embedding from encoder; k: embedding from k-th layer of decoder; up to 8 indicating the final output of decoder.")
++    parser.add_argument("--patch_embedding", action='store_true',
++                        help='Record the patch embedding in the final output file. Default: False')
++    return parser
++
++def argparser_finetune():
++    parser = argparse.ArgumentParser('HiCFoundation fine-tuning', add_help=False)
++    #config fine-tuning settings
++    parser.add_argument('--batch_size', default=128, type=int,
++                        help='Batch size of the input')
++    parser.add_argument('--accum_iter', default=4, type=int,
++                        help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)\n \
++                        The effective batch size is batch_size*accum_iter. \n If you have memory constraints, \
++                        you can increase --accum_iter and reduce the --batch_size to trade off memory for computation. \n \
++                        ')
++    parser.add_argument("--epochs",default=50,type=int,help="number of epochs for fine-tuning")
++    parser.add_argument("--warmup_epochs",default=5,type=int,
++                        help="number of warmup epochs for fine-tuning")
++    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
++                        help='start epoch of fine-tuning. \n \
++                            It will be used for resuming training and automatically load from the checkpoint.')
++    
++    # configure optimizer settings
++    parser.add_argument("--lr",default=None,type=float,help="learning rate for fine-tuning. This should not be set, \n \
++                        it will be calculated through --batch_size and --blr.")
++    parser.add_argument('--blr', type=float, default=1.5e-3, metavar='LR',
++                        help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
++    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
++                        help='lower lr bound for learning rate decay during fine-tuning.')
++    parser.add_argument("--weight_decay",default=0.05,type=float,help="weight decay for fine-tuning")
++    parser.add_argument('--layer_decay', type=float, default=0.75,
++                        help='layer-wise lr decay during fine-tuning')
++    
++    # configure the fine-tuning model settings
++    parser.add_argument("--model",default='vit_large_patch16',
++                        type=str,help="model name for fine-tuning")
++    parser.add_argument("--pretrain",default='',type=str, help='load pre-trained model for fine-tuning')
++    #add resume to support resuming training from a checkpoint
++    parser.add_argument("--resume",default='',type=str,help='resume fine-tuning from a checkpoint')
++    parser.add_argument("--finetune",default=0,type=int,help="1: only fine-tune the model's encoder; 2: fine-tune the whole model;")
++    parser.add_argument('--seed', default=888, type=int,help="random seed for fine-tuning. It is used to make sure results are reproducible.")
++    #configure loss type
++    parser.add_argument("--loss_type",default=0,type=int,help="1: MSE loss; 2: Cosine loss; \n You can define your own loss function in finetune/loss.py")
++
++    # Dataset parameters
++    parser.add_argument('--data_path', type=str, help='a directory contains many sub-directory, each sub-dir includes many .pkl files for fine-tuning. \n \
++                        The .pkl file should record a dict with following keys refer to different fine-tuning purposes\n \
++                        "input": the input Hi-C/scHi-C matrix in scipy.sparse or numpy.array format; \n \
++                        "input_count": the total count of Hi-C expriment (optional); \n \
++                        "2d_target": the output Hi-C/scHi-C matrix in scipy.sparse or numpy.array format; \n \
++                        "embed_target": the embedding vector in numpy.array format; \n \
++                        "1d_target": the 1D target vector in numpy.array format; \n \
++                        The last three keys are optional, you can adjust it based on your fine-tuning purpose.')
++    parser.add_argument("--train_config",type=str,help="a .txt file records the training information for input directory. \n \
++                        Each line should be the sub-dir name that will be used to train during fine-tuning. \n ")
++    parser.add_argument("--valid_config",type=str,help="a .txt file records the validation information for input directory. \n \
++                        Each line should be the sub-dir name that  will be used to validate during fine-tuning. \n ")
++    #add output config
++    parser.add_argument('--output', default='hicfoundation_finetune',help='output directory to save the results. \n \
++                        The output directory will contain the fine-tuned model, log files, and tensorboard logs.')
++    parser.add_argument("--tensorboard",default=0,type=int,help="1: enable tensorboard log for fine-tuning; 0: disable tensorboard log for fine-tuning")
++
++    #config distributed training 
++    parser.add_argument('--device', default='cuda', help='device to use for fine-tuning iterations')
++    parser.add_argument('--num_workers', default=8, type=int,help="workers per GPU. You can adjust it based on your server's configuration.")
++    parser.add_argument('--pin_mem', action='store_true',
++                        help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
++    #parser.set_defaults(pin_mem=True)
++
++    parser.add_argument('--world_size', default=1, type=int,
++                        help='number of distributed processes')
++    parser.add_argument('--dist_url', default='tcp://localhost:10001', help='url used to set up distributed training')
++    parser.add_argument('--rank', default=0, type=int,help="specify the rank of the server, default 0.")
++
++    #configure input size
++    parser.add_argument('--input_row_size', default=224, type=int,
++                        help='input submatrix row size')
++    parser.add_argument("--input_col_size",default=4000,type=int,help="input submatrix column size")
++    parser.add_argument("--patch_size",default=16,type=int,help="patch size for the input submatrix")
++    
++    #configure print/save frequency
++    parser.add_argument("--print_freq",default=1,type=int,
++                        help="log frequency for output log during fine-tuning")
++    parser.add_argument("--save_freq",default=1,type=int,
++                        help="save frequency for saving the fine-tuned model")
++    parser.add_argument("--gpu",default="0",type=str,help="which gpu to use, will be configured by the script automatically")
++
++
++    return parser
++
++
++def argparser_pretrain():
++    parser = argparse.ArgumentParser('HiCFoundation pre-training', add_help=False)
++    #config pre-training settings
++    parser.add_argument('--batch_size', default=128, type=int,
++                        help='Batch size of the input')
++    parser.add_argument('--accum_iter', default=4, type=int,
++                        help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)\n \
++                        The effective batch size is batch_size*accum_iter. \n If you have memory constraints, \
++                        you can increase --accum_iter and reduce the --batch_size to trade off memory for computation. \n \
++                        ')
++    parser.add_argument("--epochs",default=100,type=int,help="number of epochs for pre-training")
++    parser.add_argument("--warmup_epochs",default=10,type=int,
++                        help="number of warmup epochs for pre-training")
++    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
++                        help='start epoch of pre-training. \n \
++                            It will be used for resuming training and automatically load from the checkpoint.')
++    parser.add_argument('--mask_ratio', default=0.75, type=float,
++                        help='Masking ratio (percentage of removed patches).')
++    parser.add_argument("--sparsity_ratio",default=0.05,type=float,
++                        help="Used to the submatrix if the valid contact is less than sparsity_ratio*region_size")
++    parser.add_argument("--loss_alpha",default=1,type=float,help="loss weight for other losses to combine with the patch-contrastive loss")
++    
++    # configure optimizer settings
++    parser.add_argument("--lr",default=None,type=float,help="learning rate for fine-tuning. This should not be set, \n \
++                        it will be calculated through --batch_size and --blr.")
++    parser.add_argument('--blr', type=float, default=1.5e-3, metavar='LR',
++                        help='base learning rate: absolute_lr = base_lr * total_batch_size / 256')
++    parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
++                        help='lower lr bound for learning rate decay during fine-tuning.')
++    parser.add_argument("--weight_decay",default=0.05,type=float,help="weight decay for fine-tuning")
++
++    
++    # configure the pre-training model settings
++    parser.add_argument("--model",default='vit_large_patch16',
++                        type=str,help="model name for pre-training")
++    #add resume to support resuming training from a checkpoint
++    parser.add_argument("--resume",default='',type=str,help='resume fine-tuning from a checkpoint')
++    parser.add_argument('--seed', default=888, type=int,help="random seed for fine-tuning. It is used to make sure results are reproducible.")
++    
++    # Dataset parameters
++    parser.add_argument('--data_path', type=str, help='a directory contains many sub-directory, each sub-dir includes many .pkl files for pre-training. \n \
++                        The .pkl file should record a dict with following keys refer to different fine-tuning purposes\n \
++                        "input": the input Hi-C/scHi-C matrix in scipy.sparse or numpy.array format; \n \
++                        "input_count": the total count of corresponding Hi-C expriment (optional); \n \
++                        "diag": the diagonal starting index for the input Hi-C matrix; \n \
++                        If it is smaller than 0, it indicates the diagonal starts at (diag,0) position; \n \
++                        If it is larger than 0, it indicates the diagonal starts at (0,diag) position; \n \
++                        If its absolute value is larger than the matrix size, it indicates no diagonal info here. \n \
++                        You can also specify "diag" as None or do not include this info to indicate no diag to consider here ')
++    parser.add_argument("--train_config",type=str,help="a .txt file records the training information for input directory. \n \
++                        Each line should be the sub-dir name that will be used to train during fine-tuning. \n ")
++    parser.add_argument("--valid_config",type=str,help="a .txt file records the validation information for input directory. \n \
++                        Each line should be the sub-dir name that  will be used to validate during fine-tuning. \n ")
++    
++
++
++    #add output config
++    parser.add_argument('--output', default='hicfoundation_finetune',help='output directory to save the results. \n \
++                        The output directory will contain the fine-tuned model, log files, and tensorboard logs.')
++    parser.add_argument("--tensorboard",default=0,type=int,help="1: enable tensorboard log for fine-tuning; 0: disable tensorboard log for fine-tuning")
++
++    #config distributed training 
++    parser.add_argument('--device', default='cuda', help='device to use for fine-tuning iterations')
++    parser.add_argument('--num_workers', default=8, type=int,help="workers per GPU. You can adjust it based on your server's configuration.")
++    parser.add_argument('--pin_mem', action='store_true',
++                        help='Pin CPU memory in DataLoader for more efficient (sometimes) transfer to GPU.')
++    #parser.set_defaults(pin_mem=True)
++
++    parser.add_argument('--world_size', default=1, type=int,
++                        help='number of distributed processes')
++    parser.add_argument('--dist_url', default='tcp://localhost:10001', help='url used to set up distributed training')
++    parser.add_argument('--rank', default=0, type=int,help="specify the rank of the server, default 0.")
++
++    #configure input size
++    parser.add_argument('--input_row_size', default=224, type=int,
++                        help='input submatrix row size')
++    parser.add_argument("--input_col_size",default=4000,type=int,help="input submatrix column size")
++    parser.add_argument("--patch_size",default=16,type=int,help="patch size for the input submatrix")
++    
++    #configure print/save frequency
++    parser.add_argument("--print_freq",default=1,type=int,
++                        help="log frequency for output log during fine-tuning")
++    parser.add_argument("--save_freq",default=1,type=int,
++                        help="save frequency for saving the fine-tuned model")
++    parser.add_argument("--gpu",default="0",type=str,help="which gpu to use, will be configured by the script automatically")
++
++
++    return parser
+\ No newline at end of file
+diff --git a/refactor_pretrain/distribute_utils.py b/refactor_pretrain/distribute_utils.py
+new file mode 100644
+index 0000000..005bebf
+--- /dev/null
++++ b/refactor_pretrain/distribute_utils.py
+@@ -0,0 +1,152 @@
++"""
++    Code here is borrowed from the https://github.com/facebookresearch/deit/blob/main/utils.py
++    This file includes utility scripts for handling distributed training
++"""
++
++import os
++import torch
++import resource
++import datetime
++import builtins
++import numpy as np
++import torch.distributed as dist
++
++def is_dist_avail_and_initialized():
++    """
++        This function checks a distributed process, whether its initialized properly
++        It returns true, if all the requisites, rank, world_size parameters, seeds etc.. are setup 
++        else it returns false
++        Args: 
++            None
++        Returns:
++          bool: True if distributed backend is usable.
++
++    """
++    if not dist.is_available():
++        return False
++    if not dist.is_initialized():
++        return False
++    return True
++
++def get_rank():
++    """
++        This function fetches the rank of a distributed process in a distributed processes group. 
++        Ranks range from [0 - (world_size -1)], rank 0 is assigned to the main (master) worker
++        In a non-distributed setting the rank of the main process is also 0
++        Args: 
++            None
++        Returns:
++          int: Rank of the process
++
++    """
++    if not is_dist_avail_and_initialized():
++        return 0
++    return dist.get_rank()
++
++def get_world_size():
++    """
++        This function fetches the world_size which is the total number of workers in a distributed group. 
++        In a non-distributed setting the world size is 1 and the main process's rank is 0
++        Args: 
++            None
++        Returns:
++          int: world_size (number of processes in a distributed group)
++
++    """
++    if not is_dist_avail_and_initialized():
++        return 1
++    return dist.get_world_size()
++
++def all_reduce_mean(x):
++    """
++        This function fetches value of a particular variable 'x' from all the distributed processes and 
++        returns a mean of mean of that value. Specifically, it could be used to fetch loss for a batch of input 
++        values across the distributed processes and can return the mean of that loss for the subsequent backprop.
++        This can be used to gather evaluation metrics from other processes too. 
++        Args: 
++            x (float): A scalar value to be averaged.
++        Returns:
++            float: Average of x across all the distributed processes
++    """
++    world_size = get_world_size()
++    if world_size > 1:
++        x_reduce = torch.tensor(x).cuda()
++        dist.all_reduce(x_reduce)
++        x_reduce /= world_size
++        return x_reduce.item()
++    else:
++        return x
++
++def is_main_process():
++    """
++        A binary check for testing whether the process we are operating on is the main process
++        The check is simple, the rank of the current process should be 0 for it to considered main
++        Args: 
++            None
++        Returns:
++            bool: True if main process
++    """
++
++    return get_rank() == 0
++
++
++def setup_for_distributed(is_master):
++    """
++        This is a function that overrides the python print function to be only 
++        accessible from the main process. This convention is followed to keep the logs clean
++        Args: 
++            is_master (bool): Boolean input
++        Returns:
++            None
++    """
++    builtin_print = builtins.print
++    def print(*args, **kwargs):
++        if is_master:
++            now = datetime.datetime.now().time()
++            builtin_print('[{}] '.format(now), end='')  # print with time stamp
++            builtin_print(*args, **kwargs)
++    builtins.print = print
++
++def init_distributed_mode(gpu, ngpus_per_node, args):
++    """
++        Initialize distributed training environment by setting a few os paramters and then setup
++        distributed training across provided number of gpus across the provided number of nodes. 
++        Args:
++            gpu (int): GPU index for current process.
++            ngpus_per_node (int): Number of GPUs per node.
++            args (Namespace): Arguments object containing attributes:
++                - rank (int): Base rank of the node.
++                - world_size (int): Total number of processes.
++                - dist_url (str): Initialization URL for distributed training.
++                - seed (int): Seed for random number generators.
++        Returns:
++            None
++    """
++
++    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
++    resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
++    args.gpu = gpu
++    args.rank = args.rank * ngpus_per_node + gpu
++    os.environ['LOCAL_RANK'] = str(args.gpu)
++    os.environ['RANK'] = str(args.rank)
++    os.environ['WORLD_SIZE'] = str(args.world_size)
++    print("make sure the distributed mode is ",args.dist_url)
++
++
++
++    args.distributed = True
++
++    torch.cuda.set_device(args.gpu)
++    args.dist_backend = 'nccl'
++    print('| distributed init (rank {}): {}, gpu {}'.format(
++        args.rank, args.dist_url, args.gpu), flush=True)
++    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
++                                         timeout=datetime.timedelta(seconds=36000),
++                                         world_size=args.world_size, rank=args.rank)
++
++    setup_for_distributed(args.rank == 0)
++
++    # fix the seed for reproducibility
++    seed = args.seed + get_rank()
++    torch.manual_seed(seed)
++    np.random.seed(seed)
+diff --git a/refactor_pretrain/main_worker.py b/refactor_pretrain/main_worker.py
+new file mode 100644
+index 0000000..f1ec3fa
+--- /dev/null
++++ b/refactor_pretrain/main_worker.py
+@@ -0,0 +1,363 @@
++import os
++import time
++import json
++import torch
++import datetime
++
++import numpy as np
++import torch.nn as nn
++import torch.backends.cudnn as cudnn
++import torchvision.transforms as transforms
++import timm.optim.optim_factory as optim_factory
++
++from val_epoch import val_epoch
++from train_epoch import train_epoch
++from utils import collate_fn, write_log
++from pretrain_dataset import Pretrain_Dataset
++from torch.utils.tensorboard import SummaryWriter
++import models_hicfoundation as models_hicfoundation
++from Logger import print_important_info, print_warning_info
++from model_utils import NativeScalerWithGradNormCount as NativeScaler
++from model_utils import load_model, save_checkpoint, save_model2path
++
++from distribute_utils import init_distributed_mode,get_world_size,get_rank,is_main_process
++
++
++
++
++def parse_text(config_file, data_dir):
++    """
++        This function is reading some lines from a config file (they are not in a specific format)
++        Then the function cleans up those lines to get subdirectory paths
++        The function then checks if that subdirectory exists in a certain data_dir. It doesnt not raise an exception
++        just prints whether a subdirectory name is not in the file.
++
++        Args: 
++            str config_file: Path to the config file 
++            str data_dir: Path to the data directory 
++            
++        Returns:
++          List[str]: A list of full paths (data_dir/subdir_paths) that exist
++
++        Suggestions: 
++            1) Improve error handling, and the worker should not run if there are no valid paths in the list
++            2) There should be a single config file for the paths
++    """
++    train_list = []
++    with open(config_file) as f:
++        for line in f:
++            line = line.strip()
++            line = line.replace("\n", "")
++            if len(line) == 0:
++                continue
++            current_path = os.path.join(data_dir, line)
++            if not os.path.exists(current_path):
++                print("The sub-directory {} does not exist in the data directory".format(current_path))
++                print("Please check the sub-directory name in the {} file".format(config_file))
++                continue
++            train_list.append(current_path)
++    return train_list
++
++
++def configure_data_loader(args):
++    """
++        This function given the "args" returns Pytorch training and validation dataloader objects. 
++        The code has following stages:
++        - Step 1: Read off all the relevant keys form the namespace object 
++        - Step 2: Define the transformation function for Imagenet normalization of Hi-C sub-matrices
++        - Step 3: Create a pretraining dataset with the defined values
++        - Step 4: If distributed training, setup the requisite variables. 
++
++        Args: 
++            Namespace args object: That should contain the following keys
++                - data_path (str): Path to the base directory containing dataset subdirectories.
++                - train_config (str): Training configurations? Maybe this file contains all the subdirectories?
++                - valid_config (str): Validation configurations? Maybe this file contains all the subdirectories?
++                - input_row_size (int): Height (in pixels) of input image patches.
++                - input_col_size (int): Width (in pixels) of input image patches.
++                - sparsity_ratio (float): Minimum non-empty content ratio for patches to be included.
++                - patch_size (int): Size of each patch in each image ** 16 x 16
++                - distributed (bool): Distributed training or no
++                - batch_size (int): Batch Size
++                - num_workers (int): Number of workers for the dataloaders
++                - pin_mem (bool): Whether to enable pinned memory for faster GPU transfers.
++
++        Returns:
++            tuple:
++                - data_loader_train (torch.utils.data.DataLoader): DataLoader for training data.
++                - data_loader_val (torch.utils.data.DataLoader): DataLoader for validation data.
++
++    """
++    
++
++
++    # Step 1: Read off all the relevant keys form the namespace object 
++    data_dir = os.path.abspath(args.data_path) # Folder that should contain all the dataset subdirectories
++    train_config = os.path.abspath(args.train_config) # Training configurations?
++    train_list = parse_text(train_config, data_dir) # Gets all the valid subdirectories
++    val_config = os.path.abspath(args.valid_config) # Validation configurations? 
++    val_list = parse_text(val_config, data_dir) # Gets all the valid subdirectories
++    input_row_size = args.input_row_size # Row size of the Hi-C submatrix
++    input_col_size = args.input_col_size # Col size of the Hi-C submatrix, not necessarily the same as row size
++    sparsity_filter = float(args.sparsity_ratio) # Sparsity threshold for patch inclusion 
++    patch_size = args.patch_size # Size of each patch in each image ** 16 x 16
++
++    
++    # Step 2: Define the transformation function for Imagenet normalization of Hi-C sub-matrices
++    transform_train = transforms.Compose(
++        [
++            transforms.ToTensor(),
++            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
++        ]
++    )
++    
++    
++    # Step 3: Create a pretraining dataset with the defined values
++    dataset_train = Pretrain_Dataset(
++        train_list,
++        transform=transform_train,
++        sparsity_filter=sparsity_filter,
++        patch_size=patch_size,
++        window_height=input_row_size,
++        window_width=input_col_size,
++    )
++
++    dataset_val = Pretrain_Dataset(
++        val_list,
++        transform=transform_train,
++        sparsity_filter=sparsity_filter,
++        patch_size=patch_size,
++        window_height=input_row_size,
++        window_width=input_col_size,
++    )
++
++    
++    # Step 4: If distributed training, setup the requisite variables. 
++    if args.distributed:
++        num_tasks = get_world_size()
++        global_rank = get_rank()
++
++        # If the doing distributed training used a Distributed sampler which ensures 
++        # that each process gets a unique slice of the data
++        sampler_train = torch.utils.data.DistributedSampler(
++            dataset_train, num_replicas=num_tasks, rank=global_rank, shuffle=True
++        )
++        print("Sampler_train = %s" % str(sampler_train))
++        sampler_val = torch.utils.data.DistributedSampler(
++            dataset_val, num_replicas=num_tasks, rank=global_rank, shuffle=False
++        )
++    else:
++        # Otherwise use a randomsampler which gives a unique sample every batch
++        sampler_train = torch.utils.data.RandomSampler(dataset_train)
++        sampler_val = torch.utils.data.RandomSampler(dataset_val)
++        global_rank = -1
++    sample_batch_size = args.batch_size
++    
++    
++    # Create dataloaders and return them
++    data_loader_train = torch.utils.data.DataLoader(
++        dataset_train,
++        batch_size=sample_batch_size,
++        sampler=sampler_train,
++        num_workers=args.num_workers,
++        pin_memory=args.pin_mem, # Pinned memory makes it faster to transfer data to GPUs
++        drop_last=True,
++        collate_fn=collate_fn,
++    )
++    data_loader_val = torch.utils.data.DataLoader(
++        dataset_val,
++        batch_size=sample_batch_size,
++        sampler=sampler_val,
++        num_workers=args.num_workers,
++        pin_memory=args.pin_mem, # Pinned memory makes it faster to transfer data to GPUs
++        drop_last=False,
++        collate_fn=collate_fn,
++    )
++
++    return data_loader_train, data_loader_val
++
++
++def config_writer(output_dir, tensorboard_log):
++    """
++        This function is takes an outdir and a boolean to create a tensorboard directory. If the boolean is false
++        it doesnt create a logging directory. 
++
++        Args: 
++            str output_dir: Path to the directory that will store tensorboard files 
++            bool tensorboard_log: Whether to create a tensorboard or not
++            
++        Returns:
++          TensorBoard Obj: Returns the logger object
++    """
++    tensorboard_dir = os.path.join(output_dir, "tensorboard")
++    os.makedirs(tensorboard_dir, exist_ok=True)
++    if tensorboard_log:
++        log_writer = SummaryWriter(tensorboard_dir)
++    else:
++        log_writer = None
++    return log_writer
++
++
++def main_worker(gpu, ngpus_per_node, args):
++    # If working on a node with multiple GPUs operate in multigpu training
++    if ngpus_per_node > 1:
++        init_distributed_mode(gpu, ngpus_per_node, args)
++    else:
++        args.distributed = False
++        print_warning_info(
++            "The distributed mode is disabled.\n For pre-training, one GPU may take very long to train!"
++        )
++    
++    print("job dir: {}".format(os.path.dirname(os.path.realpath(__file__))))
++    print("{}".format(args).replace(", ", ",\n"))
++    
++    
++    # This is weird, not entirely sure why this needs to be setup like this. 
++    if args.distributed:
++        num_tasks = get_world_size()
++        global_rank = get_rank()
++    else:
++        global_rank = -1 # Not sure why would you want to deviate from the convention of global_rank of 1 for non-distributed
++        num_tasks = 1
++    
++    # Not sure whats going on here
++    output_dir = os.path.abspath(args.output)
++    if global_rank == 0:
++        os.makedirs(output_dir, exist_ok=True)
++        log_writer = config_writer(output_dir, args.tensorboard)
++    elif args.distributed:
++        log_writer = None
++    else:
++        os.makedirs(output_dir, exist_ok=True)
++        log_writer = config_writer(output_dir, args.tensorboard)
++
++
++    cudnn.benchmark = True 
++    device = torch.device(args.device)
++
++    # Data loading code
++    data_loader_train, data_loader_val = configure_data_loader(args)
++    print("Data loader is configured!")
++
++    # Configure the model
++    patch_wise_size = ( # Suggestion: Remove this unused variable?
++        args.input_row_size // args.patch_size,
++        args.input_col_size // args.patch_size,
++    )
++
++    model = models_hicfoundation.__dict__[args.model]( # Why not call identify model type more cleanly? This is difficult to read/debug
++        img_size=(args.input_row_size, args.input_col_size),
++        patch_size=args.patch_size,
++    )
++
++    model.to(device)
++    model_without_ddp = model # Why need a model without_ddp? Unsure 
++
++    if args.distributed:
++        # not necessary for current setting, since all param with grad
++        # model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
++        model = torch.nn.parallel.DistributedDataParallel(
++            model, device_ids=[args.gpu], find_unused_parameters=True
++        )
++        model_without_ddp = model.module
++    else:
++        model_without_ddp = model
++    
++    # print out model information
++    print("Model is configured!")
++
++    # configure batch size, learning rate, weight decay
++    eff_batch_size = args.batch_size * args.accum_iter * get_world_size()
++    args.lr = args.blr * eff_batch_size / 256
++    print("Learning rate: %.6f" % args.lr)
++    print("Accumulative grad iteration: %d" % args.accum_iter)
++    print("Effective batch size: %d" % eff_batch_size)
++    print("Base learning rate: %.6f" % args.blr)
++
++    # configure optimizer
++    param_groups = optim_factory.add_weight_decay(model_without_ddp, args.weight_decay)
++    # print(param_groups) #too long printing
++    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
++    loss_scaler = NativeScaler()
++
++    # resume model if it is loading from checkpoint
++    print("Optimizer is configured!")
++
++    # put args.resume in a if block, this can throw errors, if the arg is provided otherwise dont do the loading
++    resume_path = os.path.abspath(args.resume)
++    load_model(resume_path, args, model_without_ddp, optimizer, loss_scaler)
++
++    model_dir = os.path.join(output_dir, "model")
++    os.makedirs(model_dir, exist_ok=True)
++    log_dir = os.path.join(output_dir, "log")
++    os.makedirs(log_dir, exist_ok=True)
++
++    epochs = int(args.epochs)
++    start_epoch = int(args.start_epoch)
++    start_time = time.time()
++
++    print("Start pre-training from epoch %d" % start_epoch, " to epoch %d" % epochs)
++    
++    save_freq = args.save_freq
++    best_loss = 1e9
++
++    for epoch in range(start_epoch, epochs):
++        if args.distributed:
++            data_loader_train.sampler.set_epoch(epoch)
++        
++        train_stats = train_epoch(
++            model,
++            data_loader_train,
++            optimizer,
++            device,
++            epoch,
++            loss_scaler,
++            log_writer=log_writer,
++            args=args,
++        )
++        
++        log_stats = {
++            **{f"train_{k}": v for k, v in train_stats.items()},
++            "epoch": epoch,
++        }
++        
++        if is_main_process():
++            write_log(log_dir, "train", log_stats) # Some functions are defined in utils.py now
++
++        # validation run
++        val_stats = val_epoch(
++            model, data_loader_val, device, epoch, log_writer=log_writer, args=args
++        )
++        
++        val_loss = val_stats["loss"]
++        
++        log_stats_val = {
++            **{f"val_{k}": v for k, v in val_stats.items()},
++            "epoch": epoch,
++        }
++        
++        if is_main_process():
++            write_log(log_dir, "val", log_stats_val)
++        
++        if epoch % save_freq == 0 or epoch == epochs - 1:
++            # output_dir, args,epoch, model_without_ddp, optimizer, loss_scaler
++            save_checkpoint(
++                model_dir, args, epoch, model_without_ddp, optimizer, loss_scaler
++            )
++
++        if val_loss < best_loss:
++            best_loss = val_loss
++            # model_path,args,epoch, model_without_ddp, optimizer, loss_scaler
++            model_path = os.path.join(model_dir, "model_best.pth.tar")
++            save_model2path(
++                model_path, args, epoch, model_without_ddp, optimizer, loss_scaler
++            )
++
++
++    total_time = time.time() - start_time
++    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
++    
++    print("Training time {}".format(total_time_str))
++    print("Fine-tuning of HiCFoundation is finished!")
++    print("The model is saved in {}".format(model_dir))
++    print("The log is saved in {}".format(log_dir))
+\ No newline at end of file
+diff --git a/refactor_pretrain/model_funcs.py b/refactor_pretrain/model_funcs.py
+new file mode 100644
+index 0000000..f74b428
+--- /dev/null
++++ b/refactor_pretrain/model_funcs.py
+@@ -0,0 +1,113 @@
++# From MAE: https://github.com/facebookresearch/mae
++
++import math
++import torch
++import numpy as np
++
++
++def adjust_learning_rate(optimizer, epoch, args):
++    """
++    Decay the learning rate with half-cycle cosine after warmup
++    :param optimizer: torch.optimizer
++    :param epoch: int, training epoch
++    :param args: argparse arguments
++    :return: learning_rate
++    """
++    if epoch < args.warmup_epochs:
++        lr = args.lr * epoch / args.warmup_epochs
++    else:
++        lr = args.min_lr + (args.lr - args.min_lr) * 0.5 * \
++             (1. + math.cos(math.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs)))
++    for param_group in optimizer.param_groups:
++        if "lr_scale" in param_group:
++            param_group["lr"] = lr * param_group["lr_scale"]
++        else:
++            param_group["lr"] = lr
++    return lr
++
++
++def convert_count_to_pos_embed_cuda(count, embed_dim):
++    """
++    count should be log-formatted
++    :param count: torch.tensor, (N,1)
++    :param embed_dim: int, embedding dimension
++    :return:
++    """
++    assert embed_dim % 2 == 0
++    omega = torch.arange(embed_dim // 2, dtype=count.dtype, device=count.device)
++    omega = omega / embed_dim / 2.
++    omega = 1. / 10000 ** omega
++
++    out = torch.einsum('m,d->md', count, omega)  # (M, D/2), outer product
++    emb_sin = torch.sin(out)  # (M, D/2)
++    emb_cos = torch.cos(out)  # (M, D/2)
++
++    emb = torch.cat([emb_sin, emb_cos], dim=1) + 1  # enforce different compared to other embeddings
++    # (M, D)
++    return emb
++
++
++def get_2d_sincos_pos_embed(embed_dim, grid_size, cls_token=False):
++    """
++    grid_size: int of the grid height and width
++    return:
++    pos_embed: [grid_size*grid_size, embed_dim] or [1+grid_size*grid_size, embed_dim] (w/ or w/o cls_token)
++    """
++    grid_h = np.arange(grid_size, dtype=np.float32)
++    grid_w = np.arange(grid_size, dtype=np.float32)
++    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
++    grid = np.stack(grid, axis=0)
++
++    grid = grid.reshape([2, 1, grid_size, grid_size])
++    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
++    if cls_token:
++        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
++    return pos_embed
++
++
++def get_2d_sincos_pos_embed_from_grid(embed_dim, grid):
++    assert embed_dim % 2 == 0
++
++    # use half of dimensions to encode grid_h
++    emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
++    emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
++
++    emb = np.concatenate([emb_h, emb_w], axis=1)  # (H*W, D)
++    return emb
++
++
++def get_2d_sincos_pos_embed_rectangle(embed_dim, grid_size, cls_token=False):
++    """
++    grid_size, a tuple of height and width
++    """
++    grid_size_h, grid_size_w = grid_size
++    grid_h = np.arange(grid_size_h, dtype=np.float32)
++    grid_w = np.arange(grid_size_w, dtype=np.float32)
++    grid = np.meshgrid(grid_w, grid_h)  # here w goes first
++    grid = np.stack(grid, axis=0)
++    grid = grid.reshape([2, 1, grid_size_w, grid_size_h])
++    pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
++    if cls_token:
++        pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
++    return pos_embed
++
++
++def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
++    """
++    embed_dim: output dimension for each position
++    pos: a list of positions to be encoded: size (M,)
++    out: (M, D)
++    """
++    assert embed_dim % 2 == 0
++    omega = np.arange(embed_dim // 2, dtype=np.float32)
++    omega /= embed_dim / 2.
++    omega = 1. / 10000 ** omega  # (D/2,)
++
++    pos = pos.reshape(-1)  # (M,)
++    out = np.einsum('m,d->md', pos, omega)  # (M, D/2), outer product
++
++    emb_sin = np.sin(out)  # (M, D/2)
++    emb_cos = np.cos(out)  # (M, D/2)
++
++    emb = np.concatenate([emb_sin, emb_cos], axis=1)  # (M, D)
++    return emb
+diff --git a/refactor_pretrain/model_utils.py b/refactor_pretrain/model_utils.py
+new file mode 100644
+index 0000000..2c3accf
+--- /dev/null
++++ b/refactor_pretrain/model_utils.py
+@@ -0,0 +1,145 @@
++import torch
++from distribute_utils import is_main_process
++from pathlib import Path
++import os
++from math import inf
++
++
++def load_model(resume_path, args, model_without_ddp, optimizer, loss_scaler):
++    """
++    Load the model from the checkpoint
++    Args:
++        resume_path: the path to the checkpoint
++        model_without_ddp: the model
++        optimizer: the optimizer
++        loss_scaler: the loss scaler
++    """
++    if os.path.isfile(resume_path):
++        print("=> loading checkpoint '{}'".format(resume_path))
++        if resume_path.startswith('https'):
++            checkpoint = torch.hub.load_state_dict_from_url(
++                resume_path, map_location='cpu', check_hash=True)
++        else:
++            checkpoint = torch.load(resume_path, weights_only=False, map_location='cpu')
++        msg = model_without_ddp.load_state_dict(checkpoint['model'], strict=False)
++        print("model resume message:{}".format(msg))
++        optimizer.load_state_dict(checkpoint['optimizer'])
++        loss_scaler.load_state_dict(checkpoint['scaler'])
++        args.start_epoch = checkpoint['epoch'] + 1
++        print("=> loaded checkpoint '{}' (epoch {})".format(resume_path, checkpoint['epoch']))
++    else:
++        print("=> no checkpoint found at '{}'".format(resume_path))
++
++
++def save_on_master(*args, **kwargs):
++    """
++    Save model
++    :param args: positional arguments, torch.save arguments
++    :param kwargs: keyword arguments, torch.save arguments
++    :return: None
++    """
++    if is_main_process():
++        torch.save(*args, **kwargs)
++
++
++def save_checkpoint(output_dir, args, epoch, model_without_ddp, optimizer, loss_scaler):
++    """
++    Save model, optimizer, epoch, scaler and arguments as a checkpoint
++    :param output_dir: str, output directory for saving
++    :param args: positional arguments
++    :param epoch: int, training epoch
++    :param model_without_ddp: torch.nn.module, model with no distributed components
++    :param optimizer: torch.optimizer, optimizer for model training
++    :param loss_scaler: torch.cuda.amp.GradScaler, dynamically scales the loss to prevent underflow when using float16
++    :return: None.
++    """
++    # Save directory
++    output_dir = Path(output_dir)
++    # Output epoch
++    epoch_name = str(epoch)
++
++    # checkpoint path
++    checkpoint_paths = [output_dir / ('checkpoint-%s.pth' % epoch_name)]
++    for checkpoint_path in checkpoint_paths:
++        to_save = {
++            'model': model_without_ddp.state_dict(),
++            'optimizer': optimizer.state_dict(),
++            'epoch': epoch,
++            'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
++            'args': args,
++        }
++
++        save_on_master(to_save, checkpoint_path)
++
++
++def save_model2path(model_path, args, epoch, model_without_ddp, optimizer, loss_scaler):
++    """
++    Save model to a certain path
++    :param model_path: str, model path directory and file name
++    :param args: positional arguments
++    :param epoch: int, number of epochs
++    :param model_without_ddp: torch.nn.module, model with no distributional parameters
++    :param optimizer: torch.optimizer, optimizer for model training
++    :param loss_scaler: torch.cuda.amp.GradScaler, dynamically scales the loss to prevent underflow when using float16
++    :return: None
++    """
++    to_save = {
++        'model': model_without_ddp.state_dict(),
++        'optimizer': optimizer.state_dict(),
++        'epoch': epoch,
++        'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
++        'args': args,
++    }
++    save_on_master(to_save, model_path)
++
++
++class NativeScalerWithGradNormCount:
++    state_dict_key = "amp_scaler"
++
++    def __init__(self):
++        self._scaler = torch.cuda.amp.GradScaler()
++
++    def __call__(self, loss, optimizer, clip_grad=None, parameters=None, create_graph=False, update_grad=True):
++        self._scaler.scale(loss).backward(create_graph=create_graph)
++        if update_grad:
++            if clip_grad is not None:
++                assert parameters is not None
++                # unscale the gradients of optimizer's assigned params in-place
++                self._scaler.unscale_(optimizer)
++                norm = torch.nn.utils.clip_grad_norm_(parameters, clip_grad)
++            else:
++                self._scaler.unscale_(optimizer)
++                norm = get_grad_norm_(parameters)
++            self._scaler.step(optimizer)
++            self._scaler.update()
++        else:
++            norm = None
++        return norm
++
++    def state_dict(self):
++        return self._scaler.state_dict()
++
++    def load_state_dict(self, state_dict):
++        self._scaler.load_state_dict(state_dict)
++
++
++def get_grad_norm_(parameters, norm_type: float = 2.0) -> torch.Tensor:
++    """
++    Compute gradient norm
++    :param parameters: torch.tensor, model parameters
++    :param norm_type: float, which gradient norm 2.0 -> L2
++    :return: total norm
++    """
++    if isinstance(parameters, torch.Tensor):
++        parameters = [parameters]
++    parameters = [p for p in parameters if p.grad is not None]
++    norm_type = float(norm_type)
++    if len(parameters) == 0:
++        return torch.tensor(0.)
++    device = parameters[0].grad.device
++    if norm_type == inf:
++        total_norm = max(p.grad.detach().abs().max().to(device) for p in parameters)
++    else:
++        total_norm = torch.norm(torch.stack([torch.norm(p.grad.detach(), norm_type).to(device) for p in parameters]),
++                                norm_type)
++    return total_norm
+diff --git a/refactor_pretrain/models_hicfoundation.py b/refactor_pretrain/models_hicfoundation.py
+new file mode 100644
+index 0000000..bf3d871
+--- /dev/null
++++ b/refactor_pretrain/models_hicfoundation.py
+@@ -0,0 +1,468 @@
++"""
++# References:
++# timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
++# DeiT: https://github.com/facebookresearch/deit
++# MAE: https://github.com/facebookresearch/mae
++# AdPE: https://github.com/maple-research-lab/AdPE
++# --------------------------------------------------------
++"""
++from functools import partial
++
++import torch
++import torch.nn as nn
++from timm.models.vision_transformer import Block, PatchEmbed
++import numpy as np
++
++from model_funcs import get_2d_sincos_pos_embed_rectangle, convert_count_to_pos_embed_cuda
++from SSIM import ssim
++
++
++def apply_symmectric_noise(noise, diag, patch_size):
++    """
++    In this function, we find the diagonal coordinates
++    and make the square region surrounding the diagonal
++    symmetric.
++    noise:
++    diag:
++    :param noise: np.array, [B,M,N] noise matrix
++    :param diag: np.array, [B,1] diagonal position
++    :param patch_size: int, patch size
++    :return: np.array, [B,M,N] the symmetric noise matrix
++    """
++    # Get three dimensions of the noise array
++    B, M, N = noise.shape
++
++    # Extract the largest dimension of the noise array
++    max_size = max(M, N)
++
++    # For every index k in the B dimension
++    for k in range(B):
++        # select the current noise array
++        cur_array = noise[k]
++        cur_diag = int(diag[k])
++        if abs(cur_diag)>=max_size:
++            continue
++        # if diagonal starts in the first column.
++        if cur_diag < 0:
++            # the diag starts at [diag,0]
++            cur_diag = abs(cur_diag)
++            # diagonal start coordinates
++            row_start = cur_diag
++            col_start = 0
++            # If the diagonal row ends at the patch end
++            # and the column ends in the upper triangle.
++            if M - abs(cur_diag) < N:
++                row_end = M
++                col_end = M - abs(cur_diag)
++            # If the diagonal column ends at the patch end
++            # and the row ends in the upper triangle.
++            else:
++                row_end = N + abs(cur_diag)
++                col_end = N
++        # If the diagonal starts in the first row.
++        else:
++            # the diagonal starts at [0,diag]
++            # diagonal start coordinates
++            row_start = 0
++            col_start = cur_diag
++
++            # If the diagonal row ends at the patch end
++            # and the column ends in the lower triangle.
++            if M + cur_diag < N:
++                row_end = M
++                col_end = M + cur_diag
++            # If the diagonal column ends at the patch end
++            # and the row ends in the lower triangle.
++            else:
++                row_end = N - cur_diag
++                col_end = N
++        #make this region symmetric
++        cur_array[row_start:row_end, col_start:col_end] = cur_array[row_start:row_end, col_start:col_end]+cur_array[row_start:row_end, col_start:col_end].T
++        noise[k] = cur_array
++    return noise
++
++
++class Models_HiCFoundation(nn.Module):
++    """
++    HiCFoundation:
++    Masked Autoencoder with VisionTransformer backbone
++    """
++
++    def __init__(self, img_size=(224, 224),
++                 patch_size=16, in_chans=3,
++                 embed_dim=1024, depth=24, num_heads=16,
++                 decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
++                 mlp_ratio=4., norm_layer=nn.LayerNorm):
++        """
++        Constructor function for the Hi-C foundation model
++        :param img_size: tuple, Hi-C submatrix size.
++        :param patch_size: int, Hi-C patch size.
++        :param in_chans: int, number of input channels.
++        :param embed_dim: int, number of encoder embedding dimensions.
++        :param depth: int, number of transformer layers in encoder.
++        :param num_heads: int, number of attention heads in each
++                            transformer layer in the encoder.
++        :param decoder_embed_dim: int, number of decoder embedding
++                                    dimensions.
++        :param decoder_depth: int, number of transformer layers in
++                                    the decoder.
++        :param decoder_num_heads: int, number of attention heads in
++                                    each transformer layer in the decoder.
++        :param mlp_ratio: float, defines how much larger the hidden dimension
++                                 of the MLP in vision transformer is compared
++                                 to the embedding dimension.
++        :param norm_layer: torch.nn, which norm to apply to the layers.
++        """
++        super().__init__()
++
++        # encoder specification
++        self.patch_size = patch_size
++        self.in_chans = in_chans
++        self.embed_dim = embed_dim
++        self.depth = depth
++        self.num_heads = num_heads
++        self.mlp_ratio = mlp_ratio
++        self.norm_layer = norm_layer
++
++        # configure positional embedding
++        # specify the submatrix size operator
++        # as a tuple.
++        if isinstance(img_size, int):
++            img_size = (img_size, img_size)
++        self.img_size = img_size
++
++        # specify rows and columns size
++        input_row_size = img_size[0]
++        input_col_size = img_size[1]
++
++        # Divide input size by patch size to get the number of positional embeddings
++        self.pos_embed_size = (input_row_size // patch_size, input_col_size // patch_size)
++
++        # Call the patch embed function to generate patch embeddings
++        self.patch_embed = PatchEmbed(self.img_size, patch_size, in_chans, embed_dim)
++
++        # Get number of patches from the patch embedding output
++        num_patches = self.patch_embed.num_patches
++        self.num_patches = num_patches
++
++        #configure encoder
++        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
++        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
++
++        # Get the vision transformer design blocks
++        self.blocks = nn.ModuleList([
++            Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
++            for i in range(depth)])
++        # Generate the layer norms for the encoder embedding dimensions
++        self.norm = norm_layer(embed_dim)
++
++        # configure decoder
++        # Linear decoder layer
++        self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
++        # Mask token parameter
++        self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
++        # Define decoder positional embeddings
++        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches, decoder_embed_dim),
++                                              requires_grad=False)  # fixed sin-cos embedding
++        # Define the vision transformer style decoder blocks
++        self.decoder_blocks = nn.ModuleList([
++            Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, qk_scale=None, norm_layer=norm_layer)
++            for i in range(decoder_depth)])
++        # Generate the layer norms for the decoder embedding dimensions
++        self.decoder_norm = norm_layer(decoder_embed_dim)
++        # Decoder prediction linear layer
++        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size ** 2 * in_chans, bias=True)
++        # Count prediction layer
++        self.decoder_count = nn.Linear(decoder_embed_dim, 1, bias=True)
++
++        self.initialize_weights()
++
++    def initialize_weights(self):
++        """
++        Initialize the weights of the encoder and decoder networks
++        using xavier_uniform and the class and mask tokens
++        using truncated normal with standard deviation of 0.02.
++
++        :return: None.
++        """
++        # Get encoder positional embedding
++        pos_embed = get_2d_sincos_pos_embed_rectangle(self.pos_embed.shape[2], self.pos_embed_size, True)
++        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
++        # Get decoder positional embedding
++        decoder_pos_embed = get_2d_sincos_pos_embed_rectangle(self.decoder_pos_embed.shape[2],
++                                                              (self.pos_embed_size[0], self.pos_embed_size[1]), False)
++        self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
++
++        # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
++        w = self.patch_embed.proj.weight.data
++        torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
++
++        # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
++        torch.nn.init.normal_(self.cls_token, std=.02)
++        torch.nn.init.normal_(self.mask_token, std=.02)
++
++        # initialize nn.Linear and nn.LayerNorm
++        self.apply(self._init_weights)
++
++    def _init_weights(self, m):
++        """
++        Initialize linear layers with xavier uniform and
++        layer norms with constant values.
++        :param m: nn.Linear or nn.LayerNorm
++        :return: None.
++        """
++        if isinstance(m, nn.Linear):
++            # we use xavier_uniform following official JAX ViT:
++            torch.nn.init.xavier_uniform_(m.weight)
++            if isinstance(m, nn.Linear) and m.bias is not None:
++                nn.init.constant_(m.bias, 0)
++        elif isinstance(m, nn.LayerNorm):
++            nn.init.constant_(m.bias, 0)
++            nn.init.constant_(m.weight, 1.0)
++
++    def random_masking(self, x, mask_ratio, diag=None):
++        """
++        Perform per-sample random masking by per-sample shuffling.
++        Per-sample shuffling is done by argsort random noise.
++        :param x: torch.tensor, [N, L, D], sequence
++        :param mask_ratio: float, masking ratio
++        :param diag: torch.tensor, [N,1] diagonal position to symmetrical masking, if None, then random masking
++        :return: x_masked, mask, ids_restore
++        """
++        # batch, length, dim
++        N, L, D = x.shape
++        # Unmasked region ratio
++        len_keep = int(L * (1 - mask_ratio))
++        pos_row_size, pos_col_size = self.pos_embed_size
++
++        # Generate random noise
++        noise = torch.rand(N, pos_row_size, pos_col_size, device=x.device)
++
++        # If the patch contains diagonal, make the noise symmetric
++        if diag is not None:
++            noise = apply_symmectric_noise(noise, diag, self.patch_size)
++        noise = noise.view(N, L)
++
++        # sort noise for each sample
++        # ascend: small is kept, large is removed
++        ids_shuffle = torch.argsort(noise, dim=1)
++        ids_restore = torch.argsort(ids_shuffle, dim=1)
++
++        # keep the first subset
++        ids_keep = ids_shuffle[:, :len_keep]
++        x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
++
++        # generate the binary mask: 0 is keep, 1 is remove
++        mask = torch.ones([N, L], device=x.device)
++        mask[:, :len_keep] = 0
++
++        # unshuffle to get the binary mask
++        mask = torch.gather(mask, dim=1, index=ids_restore)
++        # self.len_keep = len_keep
++        # self.mask = mask
++        return x_masked, mask, ids_restore
++
++    def patchify(self, imgs, in_chans=None):
++        """
++        Convert data into patches with RGB channels.
++        :param imgs: torch.tensor, (N, 3, H, W)
++        :param in_chans: int, number of in channels
++        :return: x, (imgs.shape[0], h * w, p ** 2 * in_chans)
++        """
++
++        if in_chans is None:
++            in_chans = self.in_chans
++        p = self.patch_size
++        h = self.pos_embed_size[0]
++        w = self.pos_embed_size[1]
++
++        x = imgs.reshape(shape=(imgs.shape[0], in_chans, h, p, w, p))
++        x = torch.einsum('nchpwq->nhwpqc', x)
++        x = x.reshape(shape=(imgs.shape[0], h * w, p ** 2 * in_chans))
++        return x
++
++    def unpatchify(self, x, in_chans=None):
++        """
++        Convert patches back to raw data format.
++        :param x: (N, L, patch_size**2 *self.in_chans)
++        :param in_chans: int, number of
++        :return: imgs
++        """
++        if in_chans is None:
++            in_chans = self.in_chans
++        p = self.patch_size
++        h = self.pos_embed_size[0]
++        w = self.pos_embed_size[1]
++        assert h * w == x.shape[1]
++
++        x = x.reshape(shape=(x.shape[0], h, w, p, p, in_chans))
++        x = torch.einsum('nhwpqc->nchpwq', x)
++        imgs = x.reshape(shape=(x.shape[0], in_chans, h * p, w * p))
++        return imgs
++
++    def forward_encoder(self, imgs, total_count=None, diag=None,mask_ratio=0.75):
++        """
++        Forward function for the encoder.
++        :param imgs: torch.tensor, input patch
++        :param species_id: torch.tensor, species ID.
++        :param total_count: torch.tensor, [N, 1] total count of Hi-C, serves as input to predict the submatrix count
++        :param diag: torch.tensor, position of the diagonal in the input patch
++        :param mask_ratio: float, how much of the input patch are we masking.
++        :return: x, mask, id_restore
++        """
++        B, C, H, W = imgs.shape
++
++        # embed patches
++        x = self.patch_embed(imgs)
++
++        # add pos embed w/o cls token
++        x = x + self.pos_embed[:, 1:, :]
++
++        # masking: length -> length * mask_ratio
++        x, mask, ids_restore = self.random_masking(x, mask_ratio, diag)
++        if total_count is None:
++            # placeholder if total_count is not provided
++            total_count = torch.ones(imgs.shape[0]).to(imgs.device)
++            total_count = total_count * 1000000000
++        # gen count embedding
++        total_count = torch.log10(total_count)
++        count_embed = convert_count_to_pos_embed_cuda(total_count, self.embed_dim)
++        count_embed = count_embed.unsqueeze(1)  # (N, 1, D)
++        # species_id: (N,) tensor with values in [0, 11]
++        cls_token = self.cls_token + self.pos_embed[:, :1, :]
++        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
++
++        x = torch.cat((cls_tokens, count_embed, x), dim=1)
++        for blk in self.blocks:
++            x = blk(x)
++        x = self.norm(x)
++
++        return x, mask, ids_restore
++
++    def forward_decoder(self, x, ids_restore):
++        """
++        Forward function for the decoder.
++        :param x: torch.tensor, input
++        :param ids_restore: torch.tensor, unmasked regions
++        :return: count_pred, patch_pred
++        """
++        # embed tokens
++        x = self.decoder_embed(x)
++        # one cls token and one count token
++        num_additional_token = 2
++        # append mask tokens to sequence
++        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + num_additional_token - x.shape[1], 1)
++        x_ = torch.cat([x[:, num_additional_token:, :], mask_tokens], dim=1)  # no cls token
++        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle
++        x = torch.cat([x[:, :num_additional_token, :], x_], dim=1)  # append cls token
++
++        # add pos embed
++        x[:, num_additional_token:] = x[:, num_additional_token:] + self.decoder_pos_embed
++
++        # we should not add count information to the decoder here,
++        # but we can use all-one embedding to distinguish the cls token and count_token
++        x[:, 1] = x[:, 1] + 1  # all-one embedding for count token
++
++        # apply Transformer blocks
++        for blk in self.decoder_blocks:
++            x = blk(x)
++        x = self.decoder_norm(x)
++
++        # remove cls token
++        x = x[:, 1:, :]
++
++        # predictor projection
++        patch_pred = self.decoder_pred(x[:, 1:, :])
++        count_pred = self.decoder_count(x[:, 0, :])
++
++        return count_pred, patch_pred
++
++    def forward_loss(self, imgs, imgs_mask, pred, mask):
++        """
++        Compute all the losses
++        :param imgs: torch.tensor, input
++        :param imgs_mask: torch.tensor, input mask
++        :param pred: torch.tensor, prediction
++        :param mask: Unused
++        :return: ssim_loss, contrastive_loss
++        """
++        # If the data is in RGB format.
++        if self.in_chans == 3:
++            # unnormalize the image
++            imagenet_mean = np.array([0.485, 0.456, 0.406])
++            imagenet_std = np.array([0.229, 0.224, 0.225])
++            imagenet_mean = torch.tensor(imagenet_mean, device=imgs.device, requires_grad=False)
++            imagenet_std = torch.tensor(imagenet_std, device=imgs.device, requires_grad=False)
++            imgs_input = imgs
++            imgs = torch.einsum("bchw,c->bchw", imgs, imagenet_std)
++            imgs = torch.clip((imgs + imagenet_mean.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)), 0, 1)
++
++            pred_image = self.unpatchify(pred)
++            pred_image = torch.einsum("bchw,c->bchw", pred_image, imagenet_std)
++            pred_image = (pred_image + imagenet_mean.unsqueeze(0).unsqueeze(-1).unsqueeze(-1))
++            pred_image = torch.clip(pred_image, 0, 1)
++            target = self.patchify(imgs_input)
++            imgs_mask = self.patchify(imgs_mask, 1)  # N,L,C
++        # If the data is not in RGB format.
++        elif self.in_chans == 1:
++            imgs = imgs * imgs_mask
++            target = self.patchify(imgs)
++            pred = torch.sigmoid(pred)
++            pred_image = self.unpatchify(pred)
++            imgs_mask = self.patchify(imgs_mask)
++        #make scale to 0-1 to easy comparison of SSIM
++        ssim_loss = 1-ssim(pred_image,imgs, data_range=1, size_average=True)
++        #calculate patch contrastive loss by cross comparison between query and ground truth
++        target = nn.functional.normalize(target, dim=-1)#N,L,C
++        pred = nn.functional.normalize(pred, dim=-1)#N,L,C
++        pred_logits = torch.einsum('nlc,nkc->nlk', [pred, target]) #N,L,L
++        pred_logits = nn.functional.softmax(pred_logits, dim=-1)
++        pred_logits = -torch.log(pred_logits)
++        pred_logits = torch.diagonal(pred_logits, dim1=1, dim2=2)  # N,L, cross entropy multiply label here`
++        imgs_mask = imgs_mask.mean(dim=-1)  # N,L
++        keep_use = imgs_mask >= 0.001  # patch_size**2*0.001, roughtly >2 valid pixels
++        # keep_use = mask*keep_use
++        # # even unmasked region should also pay attention
++        contrastive_loss = (pred_logits * keep_use).sum() / keep_use.sum()
++
++        return ssim_loss,contrastive_loss
++        
++    def forward(self, imgs, imgs_mask, total_count=None, 
++                diag=None,mask_ratio=0.75, if_train=True):
++        """
++        Forward function for Hi-C foundation.
++        :param imgs: torch.tensor, input
++        :param imgs_mask: torch.tensor, input mask
++        :param species_id: int, species ID
++        :param total_count: float, total read coverage
++        :param diag: torch.tensor, location of the diagonal
++        :param mask_ratio: float, masking ratio
++        :param if_train: bool, if training
++        :return: ssim_loss, contrastive_loss, count_pred, pred_image, mask
++        """
++
++        # encoder
++        latent, mask, ids_restore = self.forward_encoder(imgs, total_count,diag,mask_ratio)
++        # decoder
++        count_pred, pred = self.forward_decoder(latent, ids_restore)  # [N, L, embed_dim]
++        # calculate loss
++        ssim_loss, contrastive_loss = self.forward_loss(imgs, imgs_mask, pred, mask)
++
++        # return pred image and mask in 2D for visualization
++        pred_image = self.unpatchify(pred)
++        mask = mask.unsqueeze(-1).repeat(1, 1, self.patch_size ** 2 * self.in_chans)  # (N, H*W, p*p*3)
++        mask = self.unpatchify(mask)  # 1 is removing, 0 is keeping
++        return ssim_loss, contrastive_loss, count_pred, pred_image, mask
++
++
++def vit_large_patch16(**kwargs):
++    """
++    Instantiate the Hi-C foundation model.
++    :param kwargs: model parameters
++    :return: HiCFoundation Object, model
++    """
++    model = Models_HiCFoundation(
++        embed_dim=1024, depth=24, num_heads=16,
++        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
++        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
++    return model
+diff --git a/refactor_pretrain/pretrain.py b/refactor_pretrain/pretrain.py
+new file mode 100644
+index 0000000..c27c917
+--- /dev/null
++++ b/refactor_pretrain/pretrain.py
+@@ -0,0 +1,57 @@
++# My code has references to the following repositories:
++# DeiT: https://github.com/facebookresearch/deit
++# BEiT: https://github.com/microsoft/unilm/tree/master/beit
++# MAE: https://github.com/facebookresearch/mae
++# AdPE: https://github.com/maple-research-lab/AdPE
++# --------------------------------------------------------
++import os
++from argparser import  argparser_pretrain
++import torch
++import torch.multiprocessing as mp
++import timm
++assert timm.__version__ == "0.3.2" # version check
++
++
++def main(args):
++    # collect multi-gpu info
++    import socket
++    hostname = socket.gethostname()
++    local_ip = socket.gethostbyname(hostname)
++    print("local ip: ",local_ip)
++
++    # number of process per node
++    ngpus_per_node = torch.cuda.device_count()
++    # total number of process to run across all gpus
++    # user gives number of nodes to use through args
++    # here we multiply process per nodes
++    args.world_size = args.world_size*ngpus_per_node
++    from main_worker import main_worker
++    if ngpus_per_node==1:
++        main_worker(args.gpu,ngpus_per_node,args)#if you only have one gpu
++    else:
++        mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node,  args))
++
++
++
++
++if __name__ == '__main__':
++    import resource
++    rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
++    resource.setrlimit(resource.RLIMIT_NOFILE, (4096*2, rlimit[1]))
++    limit_in_b = 900 * 1024 ** 3
++    resource.setrlimit(resource.RLIMIT_DATA, (limit_in_b, limit_in_b))
++    use_cuda = torch.cuda.is_available()
++    print("starting check cuda status",use_cuda)
++    #assert cuda is available
++    assert use_cuda == True, "CUDA is not available, pre-training requires CUDA support to run!"
++    parser = argparser_pretrain()
++    args = parser.parse_args()
++    #If you have many GPU on your server, but you only want to use few of them
++    # run command line to configure the environment:
++    # export CUDA_VISIBLE_DEVICES="0,1,2,3"
++    # Here you can specify the GPU you want to use
++    #check the specied input size, must be a multiple of args.patch_size
++    if args.input_row_size%args.patch_size!=0 or args.input_col_size%args.patch_size!=0:
++        print("args configuration error: input_row_size and input_col_size must be a multiple of patch_size")
++        exit(1)
++    main(args)
+diff --git a/refactor_pretrain/pretrain_dataset.py b/refactor_pretrain/pretrain_dataset.py
+new file mode 100644
+index 0000000..9584ef6
+--- /dev/null
++++ b/refactor_pretrain/pretrain_dataset.py
+@@ -0,0 +1,394 @@
++import os
++import numpy as np
++import torch
++import torch.utils.data
++import random
++from collections import defaultdict
++from scipy.sparse import coo_matrix
++import pickle 
++from utils import array_to_coo, load_pickle, to_tensor, list_to_tensor
++
++def validate_input_size(input_matrix, window_height, window_width):
++    """
++    Validate the input size is larger than the window size
++    Args:
++        input_matrix: the input matrix
++        window_height: the height of the window
++        window_width: the width of the window
++    """
++    # convert sparse input into dense matrix
++    if isinstance(input_matrix, coo_matrix):
++        input_matrix = input_matrix.toarray()
++    
++    input_height, input_width = input_matrix.shape
++    # make sure window size is smaller than input matrix size
++    if input_height>=window_height and input_width>=window_width:
++        #this validation is different from fine-tuning since we can crop the input to self-supervise
++        return True
++    return False 
++
++# trim a pkl file into desired submat
++# case 1: randomly sample one submat
++def sample_index(matrix_size,window_size):
++    """
++    Sample the index of the window
++    Args:
++        matrix_size: the size of the matrix
++        window_size: the size of the window
++    """
++    if matrix_size==window_size:
++        return 0
++    start = random.randint(0, matrix_size-window_size-1)
++    return start
++
++# trim a pkl file into desired submat
++# case 2: make sure the diagonal region only starts at the multiple of patch_size
++def sample_index_patch(matrix_size,window_size,patch_size):
++    """
++    Please choose this version if you want to use hi-c processed data pipeline
++    The generated patch make sure the diagonal region only starts at the multiple of patch_size
++    Sample the index of the window only in patch separation
++    Args:
++        matrix_size: the size of the matrix
++        window_size: the size of the window
++        patch_size: the size of the patch
++    """
++    if matrix_size==window_size:
++        return 0
++    patch_list=[]
++    for i in range(0,matrix_size-window_size,patch_size):
++        patch_list.append(i)
++    start = random.choice(patch_list)
++    return start
++
++# trim a pkl file into desired submat
++# case 3: sample only the diagonal submats
++def sample_diag_index(matrix_size,window_size,diagonal_index,patch_size):
++    """
++    Sample the index of the window
++    Args:
++        matrix_size: the size of the matrix
++        window_size: the size of the window
++        diagonal_index: the index of the diagonal
++    """
++    if diagonal_index<0 or diagonal_index>=matrix_size:
++        #invalid diagonal index
++        return sample_index(matrix_size,window_size)
++    
++    candidate_list=[diagonal_index]
++
++    left_index= diagonal_index
++    while left_index>0:
++        left_index = left_index - patch_size
++        if left_index>=0:
++            candidate_list.append(left_index)
++        else:
++            break
++
++    right_index = diagonal_index
++    while right_index<matrix_size:
++        right_index = right_index + patch_size
++        if right_index<matrix_size:
++            candidate_list.append(right_index)
++        else:
++            break
++
++    candidate_list = sorted(candidate_list)
++    final_candidate_list= [index for index in candidate_list if index+window_size<=matrix_size]
++    if len(final_candidate_list)==0:
++        final_candidate_list = candidate_list[0:1]
++    start = random.choice(final_candidate_list)
++    return start
++
++
++class Pretrain_Dataset(torch.utils.data.Dataset):
++    def __init__(self,data_list,   
++                transform=None,
++                sparsity_filter=0.05,
++                patch_size=16,
++                window_height= 224,
++                window_width = 224):
++        """
++        Args:
++            data_list: the list of data
++            transform: the transformation function
++            sparsity_filter: the sparsity ratio to filter too sparse data for pre-training
++            patch_size: size of a patch, has to be square matrix
++            window_height: the height of the window
++            window_width: the width of the window
++        """
++        
++        self.data_list = data_list # list of folders containing pkl files
++        self.transform = transform # rgb normalization 
++        self.window_height = window_height
++        self.window_width = window_width
++        self.sparsity_filter = sparsity_filter
++        self.patch_size = patch_size
++        # self.input_count_flag = False
++        self.train_dict=defaultdict(list)
++        self.train_list=[]
++
++        # iterate over all folders 
++        # one folder is given by {args.data_path}/{one element in train.txt or val.txt}/
++        for data_index, data_dir in enumerate(data_list):
++            # this pkl file folder
++            cur_dir = data_dir
++            dataset_name = os.path.basename(cur_dir)
++            listfiles = os.listdir(cur_dir) # list all the pkl files under this folder
++            listfiles = sorted(listfiles) 
++            # iterate over all pkl files
++            for file_index,file in enumerate(listfiles):
++                # full path of pkl file
++                cur_path = os.path.join(cur_dir, file)
++                # pkl files
++                if file.endswith('.pkl'):
++                    # the first pkl file in this folder, do sanity check
++                    if file_index==0:
++                        #verify the input pkl file includes the input key
++                        data= load_pickle(cur_path)
++                        data_keys = list(data.keys())
++                        # input key is nessecary, which is the count matrix
++                        if 'input' not in data:
++                            print("The input key is not included in the pkl file. The directory is skipped.")
++                            print("The dir is {}".format(cur_dir))
++                            continue
++                        #check input_count key
++                        # if 'input_count' in data:
++                        #     self.input_count_flag = True
++                        # if 'input_count' not in data:
++                        #     print("The input_count key is not included in the pkl file. The directory is skipped.")
++                        #     print("The dir is {}".format(cur_dir))
++                        #     continue
++                        
++                        #validate the input size
++                        input_matrix = data['input']
++                        if not validate_input_size(input_matrix, window_height, window_width):
++                            print("The input size is not matched with the window size. The directory is skipped.")
++                            print("The dir is {}".format(cur_dir))
++                            print("The input size is {}".format(input_matrix.shape))
++                            print("The specified window size is {} x {}".format(window_height, window_width))
++                            print("Please adjust --input_row_size and --input_col_size to match your input.")
++                            continue
++                    # organize all the valid pkl files in this dict
++                    self.train_dict[dataset_name].append(cur_path)
++                    # organize all the valid pkl files in this list
++                    self.train_list.append(cur_path)
++                # non-pkl files
++                else:
++                    print("The file {} is not a .pkl file.".format(file),"It is skipped.")
++                    continue    
++
++        print("The number of samples used in the dataset is {}".format(len(self.train_list)))
++        #print("Use count flag is {}".format(self.input_count_flag))
++
++    #you can either select the train_list or train_dict to do training based on your exprience
++    def __len__(self):
++        return len(self.train_list)
++    
++    def convert_rgb(self,data_log,max_value):
++        """
++        transform count matrix into rgb matrix
++
++        :param data_log: torch.tensor after plus 1 log10
++        :param max_value: max count after plus 1 log10
++        :return: torch.tensor, shape: [height, width, n_channel=3]
++        """
++        if len(data_log.shape)==2:
++            data_log = data_log[np.newaxis,:]
++        # for hic red channel is always constant
++        data_red = np.ones(data_log.shape)
++        # normalize to 0-1 by max, make them G, B channel
++        data_log1 = (max_value-data_log)/max_value
++        data_rgb = np.concatenate([data_red,data_log1,data_log1],axis=0,dtype=np.float32)#transform only accept channel last case
++        # reshape to (height, width, n_channel=3)
++        data_rgb = data_rgb.transpose(1,2,0)
++        return data_rgb
++    
++    def __getitem__(self, idx):
++        """
++        Args:
++            idx: the index of the data
++        """
++        # fetch the pkl file dir
++        data_path = self.train_list[idx]
++        data= load_pickle(data_path)
++        input_matrix = data['input'] # raw count matrix
++        region_size = input_matrix.shape[0]*input_matrix.shape[1] # height*weight
++
++        # calculate sparsity
++        if isinstance(input_matrix, coo_matrix):
++            cur_sparsity = input_matrix.nnz/region_size
++        else:
++            cur_sparsity = np.count_nonzero(input_matrix)/region_size
++        # filter by sparsity
++        # we suggest you processed the submatrix to make sure they pass the threshold, otherwise it may take much longer to iteratively sampling until passing the threshold
++        # if not pass the sparsity filter, repeat the sampling till passing
++        if cur_sparsity<self.sparsity_filter:
++            random_index = random.randint(0, len(self.train_list)-1)
++            return self.__getitem__(random_index)
++        
++        # convert sparsity matrix into dense
++        if isinstance(input_matrix, coo_matrix):
++            input_matrix = input_matrix.toarray()
++            #make sure you save the down-diagonal regions if you use the coo_matrix
++            #to support off-diagonal submatrix, we did not any automatic symmetrical conversion for your input array.
++
++        input_matrix = np.nan_to_num(input_matrix)
++        
++        # higher-level total count
++        # can be chromosome-level or species-level
++        # the model will use higher-level total count to try to predict submatrix count
++        if 'input_count' in data:
++            matrix_count = np.sum(input_matrix) # submatrix count
++            hic_count = data['input_count'] # higher-level total count
++            if hic_count is None:
++                hic_count = 1000000000
++        
++        else:
++            hic_count = 1000000000 # as placeholder for cases user some data without input_count but some with
++            matrix_count = np.sum(input_matrix) # submatrix count
++        hic_count = float(hic_count)
++        
++        submat = np.zeros([1,self.window_height,self.window_width]) # placeholder
++
++        #judge if we need to use diag or not
++        use_diag_flag=False
++        
++        # if the main diagonal of the HiC matrix is present in this submatrix
++        # the model will make sure masking is symmetric along the diagonal
++        
++        if "diag" not in data:        
++            pass # ignore the symmetricity
++        else:
++            # check if main diag is in this submatrix
++            diag = data['diag']
++            if diag is None:
++                pass
++            elif (diag<0 and abs(diag)>=input_matrix.shape[0]):
++                pass
++            elif (diag>0 and diag>=input_matrix.shape[1]):
++                pass
++            else:
++                use_diag_flag=True # main diagonal is present in this matrix
++        
++        if not use_diag_flag:
++            # patch coordinates
++            row_start = sample_index(input_matrix.shape[0],self.window_height)
++            col_start = sample_index(input_matrix.shape[1],self.window_width)
++            return_diag= max(self.window_height,self.window_width)+1#indicating no diag needed to use
++        else:
++            M,N = input_matrix.shape
++            # calculate exactly where is the diagonal in the submatrix
++            if diag<0:
++                #diag starts at [diag,0], ends [M-1,M-1-abs(diag)] if M<N
++                #else have the possibility diag starts at [diag,0], ends [N-1+diag,N-1] if M>=N
++                diag = abs(diag) #make sure diag is positive to do calculation
++                if M-abs(diag)<N:
++                    #first sample col_start, to check if diagonal region is included
++                    col_start = sample_index(input_matrix.shape[1],self.window_width)
++                    diag_col_end = input_matrix.shape[0]-abs(diag)
++                    if col_start>=diag_col_end:
++                        row_start = sample_index(input_matrix.shape[0],self.window_height)
++                        return_diag= max(self.window_height,self.window_width)+1 #no diag needed to use
++                    else:
++                        #diagonal region is included
++                        #use the diagonal index and row start to define the row_start we can use
++                        #make sure the diagonal region is in the patch boundary
++                        search_diag = abs(diag)+col_start
++                        row_start=sample_diag_index(input_matrix.shape[0],self.window_height,search_diag,self.patch_size)
++                        return_diag = row_start-search_diag
++                        #if it is positive, then boundary starts in row of submatrix, if it is negative, then boundary starts in col of submatrix
++                        #here we limits the freedom to not consider the bigger randomness if abs(diag)>self.window_height, then the row_start can be have more choices
++                        #because col_start is already full degree of randomness
++                else:
++                    #diag starts at [diag,0], ends [diag+N-1,N-1] if M>=N
++                    #consider only possiblility of diagonal region is not included
++                    row_start = sample_index(input_matrix.shape[0],self.window_height)
++                    if row_start+self.window_height<abs(diag) or row_start>=M-abs(diag)-N:
++                        col_start = sample_index(input_matrix.shape[1],self.window_width)
++                        return_diag= max(self.window_height,self.window_width)+1
++                    else:
++                        #diagonal region is included
++                        search_diag = row_start-abs(diag)
++                        if search_diag>0:
++                            col_start=sample_diag_index(input_matrix.shape[1],self.window_width,search_diag,self.patch_size)
++                            return_diag = search_diag-col_start
++                            #if it is positive, then boundary starts in row of submatrix, if it is negative, then boundary starts in col of submatrix
++                        else:
++                            #full random of col_start, then control row_start to make sure diagonal in the patch boundary
++                            col_start = sample_index(input_matrix.shape[1],self.window_width)
++                            search_diag=col_start+abs(diag)
++                            row_start=sample_diag_index(input_matrix.shape[0],self.window_height,search_diag,self.patch_size)
++                            return_diag = row_start-search_diag
++            else:
++                #diag starts at [0,diag], ends [M-1,M-1+diag] if M<N
++                #else have the possiblity diag starts at [0,diag], ends [N-1-diag,N-1] if M>=N
++                diag=abs(diag)
++                if M+diag<N:
++                    #1st situation: diag starts at [0,diag], ends [M-1,M-1+diag]
++                    col_start = sample_index(input_matrix.shape[1],self.window_width)
++                    diag_col_left = diag
++                    diag_col_right= M+diag
++                    if col_start+self.window_width<=diag_col_left or col_start>=diag_col_right:
++                        row_start = sample_index(input_matrix.shape[0],self.window_height)
++                        return_diag= max(self.window_height,self.window_width)+1
++                    else:
++                        #diagonal region is included
++                        search_diag = col_start-diag
++                        if search_diag>=0:
++                            row_start=sample_diag_index(input_matrix.shape[0],self.window_height,search_diag,self.patch_size)
++                            return_diag=row_start-search_diag
++                        else:
++                            #full random of row_start, then control col_start to make sure diagonal in the patch boundary
++                            row_start = sample_index(input_matrix.shape[0],self.window_height)
++                            search_diag=row_start+diag
++                            col_start=sample_diag_index(input_matrix.shape[1],self.window_width,search_diag,self.patch_size)
++                            return_diag = search_diag-col_start
++                else:
++                    #2nd condition: diag starts at [0,diag], ends [N-1-diag,N-1]
++                    row_start = sample_index(input_matrix.shape[0],self.window_height)
++                    diag_row_end = N-diag
++                    if row_start>=diag_row_end:
++                        col_start = sample_index(input_matrix.shape[1],self.window_width)
++                        return_diag= max(self.window_height,self.window_width)+1
++                    else:
++                        #diagonal region is included
++                        search_diag = row_start+diag
++                        col_start=sample_diag_index(input_matrix.shape[1],self.window_width,search_diag,self.patch_size)
++                        return_diag = search_diag-col_start
++                        #here we limits the freedom to not consider the bigger randomness if abs(diag)>self.window_width, then the col_start can be have more choices
++                        #because row_start is already full degree of randomness
++
++        row_end = min(row_start+self.window_height,input_matrix.shape[0])
++        col_end = min(col_start+self.window_width,input_matrix.shape[1])
++        # fetch the raw count submatrix
++        submat[0,0:row_end-row_start,0:col_end-col_start] = input_matrix[row_start:row_end,col_start:col_end] 
++
++        submat = submat.astype(np.float32)
++
++        # this mask is not masked reconstruction
++        # this mask is which entry is nonzero
++        mask_array = np.ones(submat.shape,dtype=np.float32)
++        mask_array[submat==0]=0
++        mask_array = mask_array[np.newaxis,:,:]
++
++        cur_sparsity = np.sum(mask_array)/self.window_height/self.window_width
++        input = submat
++        max_value = np.max(input) # max of this submat
++        # if too sparse or max too low, then sample another one
++        if cur_sparsity<self.sparsity_filter or max_value<0.01:
++            random_index = random.randint(0, len(self.train_list)-1)
++            return self.__getitem__(random_index)
++        
++        # raw count to rgb transform step 1: plus one log10
++        input = np.log10(input+1)
++        max_value = np.log10(max_value+1)
++        # raw count to rgb transform step 2: convert rgb
++        input = self.convert_rgb(input,max_value)
++        # normalize rgb
++        if self.transform is not None:
++            input = self.transform(input)
++        # convert the diagonal position from pixel unit into patch unit
++        return_diag = int(return_diag / self.patch_size)
++        
++        return list_to_tensor([input, mask_array, hic_count, return_diag,matrix_count])
+\ No newline at end of file
+diff --git a/refactor_pretrain/train_epoch.py b/refactor_pretrain/train_epoch.py
+new file mode 100644
+index 0000000..0af662d
+--- /dev/null
++++ b/refactor_pretrain/train_epoch.py
+@@ -0,0 +1,145 @@
++import sys # Unused import
++import time # Unused import
++import math
++import torch
++
++import numpy as np
++import torch.nn.functional as F
++
++from typing import Iterable
++from Logger import MetricLogger,SmoothedValue
++from model_funcs import adjust_learning_rate
++from utils import list_to_device, to_value, create_image, torch_to_nparray
++
++
++def train_epoch(model,data_loader,optimizer,
++                device, epoch, loss_scaler,
++                log_writer=None,args=None):
++    
++    """
++    Runs one full training epoch
++    Args:
++        model (torch.nn.Module): HiCFoundation model object
++        data_loader (Iterable): Training Dataloader object
++        optimizer (torch.optim.Optimizer): Optimizer instance for training.
++        device (str): Training Device
++        epoch (int): Current epoch
++        loss_scaler (callable): NativeScalerWithGradNormCount object
++        log_writer (optional): Tensorboard object
++        args (Namespace or dict):
++            Training configuration with at least:
++                print_freq (int)   - logging frequency in steps
++                accum_iter (int)   - number of steps to accumulate gradients
++                mask_ratio (float) - masking ratio for model input
++                loss_alpha (float) - weight for (ssim_loss + count_loss)
++    Returns:
++        dict[str, float]: Global metric averages upto this epoch
++    """
++
++    model.train() # Putting model in the training mode
++
++    metric_logger = MetricLogger(delimiter="  ")
++    metric_logger.add_meter('lr', SmoothedValue(window_size=1, fmt='{value:.6f}')) # Track the learning rate in the smoothedvalue logger
++    header = 'Epoch: [{}]'.format(epoch) 
++    print_freq = args.print_freq # Logging frequency from config ??
++
++    accum_iter = args.accum_iter 
++
++    optimizer.zero_grad() # Reset the old gradients 
++
++    if log_writer is not None:
++        print('log_dir: {}'.format(log_writer.log_dir)) # I am not sure why we need to print it every epoch to know where we logging?
++    
++    print("number of iterations: ",len(data_loader))
++    
++    num_iter = len(data_loader) # Unused variable
++
++    for data_iter_step, data in enumerate(metric_logger.log_every(data_loader, print_freq, header)): # This allows to only log every "print_freq" steps
++
++        if data_iter_step % accum_iter == 0: # Update learning rate after "accum_iter" steps
++            adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
++        
++        # Move batch to device and unpack fields
++        input_matrix, mask_matrix, hic_count, return_diag, matrix_count = list_to_device(data,device=device) 
++
++        with torch.cuda.amp.autocast(): #to enable mixed precision training
++            ssim_loss, contrastive_loss, count_pred, pred_image, mask = model( # Forward pass
++                input_matrix, mask_matrix, 
++                total_count=hic_count,
++                diag=return_diag, mask_ratio=args.mask_ratio, 
++            )
++            
++            # Count prediction
++            matrix_count = torch.log10(matrix_count+1)
++            count_pred = count_pred.flatten()
++            count_loss = torch.nn.functional.mse_loss(count_pred, matrix_count)
++            loss = args.loss_alpha*(ssim_loss+count_loss) + contrastive_loss # Why alpha for ssim+count_loss and no control for contrastive?
++
++        # Log loss values
++        metric_logger.update(loss=to_value(loss))
++        metric_logger.update(ssim_loss=to_value(ssim_loss))
++        metric_logger.update(count_loss=to_value(count_loss))
++        metric_logger.update(contrastive_loss=to_value(contrastive_loss))
++
++        # Do not backprop for NaN or infinite loss (Maybe introduce loss clipping instead)?
++        if not math.isfinite(to_value(loss)):
++            print("Loss is {}, stopping training".format(to_value(loss)))
++            #sys.exit(1)
++            optimizer.zero_grad()
++            continue
++        
++        # loss = loss / accum_iter
++        loss_scaler(
++            loss, optimizer, 
++            parameters=model.parameters(),
++            update_grad=(data_iter_step + 1) % accum_iter == 0
++        ) # NativeScalerWithGradNormCount object
++
++        # After each accumulation cycle, clear grads
++        if (data_iter_step + 1) % accum_iter == 0:
++            optimizer.zero_grad()
++
++        # Synchronization step (across multiple workers -- DDP)
++        torch.cuda.synchronize() # Make sure all gradients are finished computing before moving on
++        lr = optimizer.param_groups[0]["lr"]
++        metric_logger.update(lr=lr)
++
++
++        # Tensorboard logging 
++        if log_writer is not None and ((data_iter_step + 1) % accum_iter == 0 or data_iter_step==0):
++            """ 
++            We use epoch_1000x as the x-axis in tensorboard.
++            This calibrates different curves when batch size changes.
++            """
++            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
++            log_writer.add_scalars('Loss/loss', {'train_loss': to_value(loss)}, epoch_1000x)
++            log_writer.add_scalars('Loss/ssim_loss', {'train_loss': to_value(ssim_loss)}, epoch_1000x)
++            log_writer.add_scalars('Loss/count_loss', {'train_loss': to_value(count_loss)}, epoch_1000x)
++            log_writer.add_scalars('Loss/contrastive_loss', {'train_loss': to_value(contrastive_loss)}, epoch_1000x)
++            log_writer.add_scalars('LR/lr', {'lr': lr}, epoch_1000x)
++            #add visualization
++            if ((data_iter_step+1)//accum_iter)%50==0 or data_iter_step==0:
++                new_samples = create_image(input_matrix)
++                mask_image = new_samples*(1-mask)
++                pred_image = create_image(pred_image) 
++
++                select_num = min(8,len(new_samples))
++                new_samples = torch_to_nparray(new_samples.clone().detach()[:select_num])
++                mask_image = torch_to_nparray(mask_image.clone().detach()[:select_num])
++                pred_image = torch_to_nparray(pred_image.clone().detach()[:select_num])
++                log_writer.add_images('Target_%s'%"train", new_samples, epoch_1000x)
++                log_writer.add_images('Input_%s'%"train", mask_image, epoch_1000x)
++                log_writer.add_images('Pred_%s'%"train", pred_image, epoch_1000x)
++
++    # Sync metrics across processes (DDP-safe)
++    metric_logger.synchronize_between_processes()
++    print("Averaged stats:", metric_logger)
++    
++    # Return global averages across all logged metrics
++    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
++
++
++                
++
++
++
+diff --git a/refactor_pretrain/utils.py b/refactor_pretrain/utils.py
+new file mode 100644
+index 0000000..e53671e
+--- /dev/null
++++ b/refactor_pretrain/utils.py
+@@ -0,0 +1,164 @@
++
++"""
++from ops.sparse_ops import array_to_coo
++"""
++from scipy.sparse import triu,coo_matrix
++import numpy as np
++import torch
++import numpy as np
++import torch.nn as nn
++import pickle
++import os
++import json 
++
++
++def array_to_coo(array):
++    """
++    Convert a regular 2D NumPy array to a scipy.sparse.coo_matrix.
++
++    Parameters:
++    - array (numpy.ndarray): The input 2D array.
++
++    Returns:
++    - scipy.sparse.coo_matrix: The converted COO matrix.
++    """
++    # Find the non-zero elements in the array
++    row, col = np.nonzero(array)
++
++    # Get the values of the non-zero elements
++    data = array[row, col]
++
++    # Create the COO matrix
++    coo_mat = coo_matrix((data, (row, col)), shape=array.shape)
++
++    return coo_mat
++
++"""
++from ops.io_utils import load_pickle
++"""
++
++def load_pickle(path):
++    with open(path,'rb') as file:
++        data=pickle.load(file)
++    return data
++
++"""
++from data_processing.finetune_dataset import to_tensor, list_to_tensor
++"""
++
++
++def to_tensor(x):
++    """
++    Convert the input to tensor
++    Args:
++        x: the input data
++    """
++    if isinstance(x, np.ndarray):
++        x = torch.from_numpy(x)
++    elif x is None:
++        x = None
++    #if already tensor, do nothing
++    elif isinstance(x, torch.Tensor):
++        pass
++    #if float, convert to tensor
++    elif isinstance(x, float):
++        x = torch.tensor(x)
++    elif isinstance(x, int):
++        x = torch.tensor(x)
++    return x
++
++def list_to_tensor(x):
++    """
++    Convert the list to tensor
++    Args:
++        x: the input list
++    """
++    y=[]
++    for i in x:
++        y.append(to_tensor(i))
++    return y
++
++
++
++
++"""
++from ops.train_utils import list_to_device, to_value, create_image, torch_to_nparray
++"""
++
++def list_to_device(data_list, device):
++
++    def to_device(data, device):
++        if data is not None:
++            new_data = data.to(device,non_blocking=True)
++        else:
++            new_data = None
++        return new_data
++
++    new_data_list = []
++    for data in data_list:
++        data = to_device(data, device)
++        if data is not None:
++            data = data.float()
++        new_data_list.append(data)
++    return new_data_list
++
++def to_value(data):
++    if isinstance(data, torch.Tensor):
++        return data.item()
++    else:
++        return data
++
++def create_image(samples):
++    imagenet_mean = np.array([0.485, 0.456, 0.406])
++    imagenet_std = np.array([0.229, 0.224, 0.225])
++    imagenet_mean = torch.tensor(imagenet_mean,device=samples.device)
++    imagenet_std = torch.tensor(imagenet_std,device=samples.device)
++    new_samples = torch.einsum("bchw,c->bchw",samples,imagenet_std)
++    new_samples = torch.clip((new_samples+ imagenet_mean.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)) * 255, 0, 255)
++    return new_samples
++
++def torch_to_nparray(data):
++    #https://github.com/pytorch/pytorch/blob/main/torch/utils/tensorboard/summary.py
++    #image take n,c,h,w,
++    """
++    'tensor' can either have values in [0, 1] (float32) or [0, 255] (uint8).
++        The image() function will scale the image values to [0, 255] by applying
++        a scale factor of either 1 (uint8) or 255 (float32). Out-of-range values
++        will be clipped.
++
++    """
++    data = data.cpu().numpy()
++   #data = data.transpose(0,2,3,1)
++    data=np.array(data,dtype=np.uint8)
++    return data
++
++
++import torch
++def collate_fn(batch):
++    # Transpose the batch (list of lists) to group elements by position
++    batch_transposed = list(zip(*batch))
++    
++    # Process each position across the batch
++    processed_batch = []
++    for tensors in batch_transposed:
++        if all(t is None for t in tensors):  # If all are None, keep None
++            processed_batch.append(None)
++        else:  # Otherwise, stack non-None tensors and replace None with zero tensors
++            #make sure no None element in the tensors
++            any_none = any(t is None for t in tensors)
++            assert not any_none, "None element in a list of tensors"
++            stacked = [
++                t for t in tensors
++            ]
++            processed_batch.append(torch.stack(stacked))
++    
++    return processed_batch
++
++
++"""
++from ops.io_utils import write_log
++"""
++def write_log(log_dir,status_flag,log_stats):
++    cur_log_path = os.path.join(log_dir,status_flag+".log")
++    with open(cur_log_path, mode="a", encoding="utf-8") as f:
++        f.write(json.dumps(log_stats) + "\n")
+\ No newline at end of file
+diff --git a/refactor_pretrain/val_epoch.py b/refactor_pretrain/val_epoch.py
+new file mode 100644
+index 0000000..b80e41d
+--- /dev/null
++++ b/refactor_pretrain/val_epoch.py
+@@ -0,0 +1,107 @@
++import sys  # Unused
++import math # Unused
++import time # Unused
++import torch
++import numpy as np # Unused
++import torch.nn.functional as F
++
++from typing import Iterable # Unused
++from Logger import MetricLogger,SmoothedValue # SmoothedValue Unused
++from utils import list_to_device, to_value, create_image, torch_to_nparray
++
++def val_epoch(model, data_loader, 
++              device, epoch,
++              log_writer=None,
++              args=None, flag='val'): # Flag unnecessary its always a validation loop
++    """
++    Runs one full validation epoch.
++
++    Args:
++        model (torch.nn.Module): HiCFoundation model object
++        data_loader (Iterable): Validation Dataloader object
++        device (str): Training Device
++        epoch (int): Current epoch
++        log_writer (optional): Tensorboard object
++        args (Namespace or dict):
++            Training configuration with at least:
++                print_freq (int)   - logging frequency in steps
++                accum_iter (int)   - number of steps to accumulate gradients
++                mask_ratio (float) - masking ratio for model input
++                loss_alpha (float) - weight for (ssim_loss + count_loss)
++    Returns:
++        dict[str, float]: Global metric averages upto this epoch
++    """
++    
++    model.eval() # Putting model in the evaluation mode
++    
++    metric_logger = MetricLogger(delimiter="  ")
++    header = 'Val Epoch: [{}]'.format(epoch)
++    
++    print_freq = args.print_freq 
++    accum_iter = args.accum_iter
++    
++    if log_writer is not None:
++        print('log_dir: {}'.format(log_writer.log_dir))
++    
++    print("number of iterations: ",len(data_loader))
++    
++    num_iter = len(data_loader) # Unused variable
++    
++    for data_iter_step, data in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
++        
++        input_matrix, mask_matrix, hic_count, return_diag,matrix_count = list_to_device(data,device=device)
++        
++        with torch.no_grad():
++            # Forward pass
++            ssim_loss,contrastive_loss, count_pred, pred_image, mask = model(
++                input_matrix, mask_matrix, 
++                total_count=hic_count, diag=return_diag,
++                mask_ratio=args.mask_ratio)
++            
++            # Count loss
++            matrix_count = torch.log10(matrix_count+1)
++            count_pred = count_pred.flatten()
++            count_loss = torch.nn.functional.mse_loss(count_pred, matrix_count)
++            
++            # Total loss
++            loss = args.loss_alpha*(ssim_loss+count_loss) + contrastive_loss
++        
++        # Logging the losses 
++        metric_logger.update(loss=to_value(loss))
++        metric_logger.update(ssim_loss=to_value(ssim_loss))
++        metric_logger.update(count_loss=to_value(count_loss))
++        metric_logger.update(contrastive_loss=to_value(contrastive_loss))
++        
++        torch.cuda.synchronize() # Make sure all gradients are finished computing before moving on
++
++        # Tensorboard loggings
++        if log_writer is not None and ((data_iter_step + 1) % accum_iter == 0 or data_iter_step==0):
++            """ 
++            We use epoch_1000x as the x-axis in tensorboard.
++            This calibrates different curves when batch size changes.
++            """
++            epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
++            log_writer.add_scalars('Loss/loss', {'%s_loss'%flag: to_value(loss)}, epoch_1000x)
++            log_writer.add_scalars('Loss/ssim_loss', {'%s_loss'%flag: to_value(ssim_loss)}, epoch_1000x)
++            log_writer.add_scalars('Loss/count_loss', {'%s_loss'%flag: to_value(count_loss)}, epoch_1000x)
++            log_writer.add_scalars('Loss/contrastive_loss', {'%s_loss'%flag: to_value(contrastive_loss)}, epoch_1000x)
++            #add visualization
++            if ((data_iter_step+1)//accum_iter)%50==0 or data_iter_step==0:
++                new_samples = create_image(input_matrix)
++                mask_image = new_samples*(1-mask)
++                pred_image = create_image(pred_image) 
++
++                select_num = min(8,len(new_samples))
++                new_samples = torch_to_nparray(new_samples.clone().detach()[:select_num])
++                mask_image = torch_to_nparray(mask_image.clone().detach()[:select_num])
++                pred_image = torch_to_nparray(pred_image.clone().detach()[:select_num])
++                log_writer.add_images('Target_%s'%flag, new_samples, epoch_1000x)
++                log_writer.add_images('Input_%s'%flag, mask_image, epoch_1000x)
++                log_writer.add_images('Pred_%s'%flag, pred_image, epoch_1000x)
++    
++    # Sync metrics across processes (DDP-safe)
++    metric_logger.synchronize_between_processes()
++    print("Averaged stats:", metric_logger)
++
++    # Returns a global average of validation metrics
++    return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
+\ No newline at end of file

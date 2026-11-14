@@ -1,0 +1,71 @@
+version = "1.0"
+
+[task]
+name = "default/saezlab__corneto-66"
+description = "Release 1.0.0rc9: shortest-path fixes and biological signaling plots"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "corneto",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "saezlab/corneto"
+ref = "d9f6d238d6c41cc20ecc0b4a17d105cbf209b360"
+reference = "https://github.com/saezlab/corneto/pull/66"
+source_access = "auto"
+built_at = "2026-11-14T07:01:48.144828+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:9ec7c456c72540d50b5f59a5c12561d1c2e5b3548891b83b5c3fc665599861d2"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-10T19:34:16Z"
+diff_format = "unified"
+context_files = [
+    "corneto/_plotting.py",
+    "corneto/methods/shortest_path.py",
+    "corneto/plotting/__init__.py",
+    "corneto/plotting/signaling.py",
+    "docs/_extension/gallery_directive.py",
+    "docs/guide/intro/plotting.ipynb",
+    "docs/releases/index.md",
+    "docs/releases/v1.0.0-rc.9.md",
+    "tests/graph/test_signaling_biology.py",
+    "tests/methods/test_shortest_path.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 984
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

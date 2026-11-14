@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/refinery-platform__refinery-platform-3495"
+description = "Add NPM package-lock.json to version control"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "refinery-platform",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "refinery-platform/refinery-platform"
+ref = "d60004dff050f377c659e0b0cb661ab9ab75e363"
+reference = "https://github.com/refinery-platform/refinery-platform/pull/3495"
+source_access = "auto"
+built_at = "2026-11-14T07:01:56.958513+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:0dd536bc83242bf8b9bdbf208eac535e69c7bfc547a87c954717f3f993f9adb5"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2019-11-21T16:22:51Z"
+diff_format = "unified"
+context_files = [
+    "refinery/ui/package-lock.json",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 6877
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

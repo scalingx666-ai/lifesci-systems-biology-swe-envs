@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/SciML__CellMLToolkit.jl-206"
+description = "Require Symbolics 7.39.2 (32-bit hasha_seed)"
+
+[metadata]
+difficulty = "easy"
+category = "bugfix"
+keywords = [
+    "CellMLToolkit.jl",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "SciML/CellMLToolkit.jl"
+ref = "d4049afacc56c547ad769b38a0b727e4d52008be"
+reference = "https://github.com/SciML/CellMLToolkit.jl/pull/206"
+source_access = "auto"
+built_at = "2026-11-14T07:03:11.620895+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:f1e5f1d59a5d6c73c7a8f20330dd45a7d704f53566d1e0841af867501ca2bb30"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-09-09T02:40:07Z"
+diff_format = "unified"
+context_files = [
+    "Project.toml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 4
+difficulty = "trivial"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

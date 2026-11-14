@@ -1,0 +1,66 @@
+diff --git a/.github/pysb-conda-env.yml b/.github/pysb-conda-env.yml
+index a41435ab..1903b054 100644
+--- a/.github/pysb-conda-env.yml
++++ b/.github/pysb-conda-env.yml
+@@ -18,9 +18,9 @@ dependencies:
+   - pandas
+   - pydot
+   - coverage
+-  - coveralls
+-  - mock
+   - pip
++  # setuptools required by Cython
++  # https://github.com/cython/cython/issues/5976
+   - setuptools
+   - pip:
+       - libroadrunner
+diff --git a/doc/conf.py b/doc/conf.py
+index 303f347f..5c82b76e 100644
+--- a/doc/conf.py
++++ b/doc/conf.py
+@@ -13,7 +13,7 @@
+ 
+ import sys, os
+ import re
+-import mock
++from unittest import mock
+ 
+ # If extensions (or modules to document with autodoc) are in another directory,
+ # add these directories to sys.path here. If the directory is relative to the
+diff --git a/doc/requirements.txt b/doc/requirements.txt
+index a4c5ca20..a0d15b02 100644
+--- a/doc/requirements.txt
++++ b/doc/requirements.txt
+@@ -3,6 +3,4 @@
+ sphinx>=8.2.3,<9
+ sphinx-rtd-theme>=3.1.0,<4
+ numpydoc>=0.6
+-mock>=1.0
+-setuptools>=20.0
+ ipython
+diff --git a/pysb/tests/test_importers.py b/pysb/tests/test_importers.py
+index 0fe35303..201303d0 100644
+--- a/pysb/tests/test_importers.py
++++ b/pysb/tests/test_importers.py
+@@ -7,7 +7,7 @@
+ from nose.tools import assert_raises_regex, raises
+ from nose.plugins.skip import SkipTest
+ import warnings
+-import mock
++from unittest import mock
+ import tempfile
+ import shutil
+ from pysb.logging import get_logger
+diff --git a/setup.py b/setup.py
+index ea6e5e2a..3fc56113 100755
+--- a/setup.py
++++ b/setup.py
+@@ -27,7 +27,7 @@ def main():
+                             'networkx>=3.6.1'],
+           setup_requires=['pynose'],
+           tests_require=['coverage', 'pygraphviz', 'matplotlib', 'pexpect',
+-                         'pandas', 'h5py', 'mock', 'cython',
++                         'pandas', 'h5py', 'cython',
+                          'python-libsbml', 'libroadrunner'],
+           cmdclass=cmdclass,
+           keywords=['systems', 'biology', 'model', 'rules'],

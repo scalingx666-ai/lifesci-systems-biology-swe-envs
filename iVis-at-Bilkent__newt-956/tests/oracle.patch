@@ -1,0 +1,39 @@
+diff --git a/app/js/app-menu.js b/app/js/app-menu.js
+index cb4a40a5..d2487fc8 100644
+--- a/app/js/app-menu.js
++++ b/app/js/app-menu.js
+@@ -1465,6 +1465,22 @@ module.exports = function() {
+       chiseInstance.highlightSelected(cy.elements(':selected'));
+     });
+ 
++    $("#highlight-unannotated").click(function (e) {
++
++      // use active chise instance
++      var chiseInstance = appUtilities.getActiveChiseInstance();
++
++      // use cy instance associated with chise instance
++      var cy = chiseInstance.getCy();
++
++      var unannotatedElements = cy.elements().filter(function (element) {
++        var annotations = element.data('annotations');
++        return !annotations || $.isEmptyObject(annotations);
++      });
++
++      chiseInstance.highlightSelected(unannotatedElements);
++    });
++
+     $("#highlight-processes-of-selected").click(function (e) {
+ 
+       // use active chise instance
+diff --git a/index.html b/index.html
+index 3c3ed57c..1cf905d8 100644
+--- a/index.html
++++ b/index.html
+@@ -409,6 +409,7 @@
+                     <a href="#" id="highlight-search-menu-item">Search...</a>
+                   </li>
+                   <li><a href="#" id="highlight-selected">Selected</a></li>
++                  <li><a href="#" id="highlight-unannotated">Unannotated</a></li>
+                   <li>
+                     <a href="#" id="highlight-neighbors-of-selected">Neighbors of Selected</a>
+                   </li>

@@ -1,0 +1,104 @@
+diff --git a/R/heatplot.R b/R/heatplot.R
+index c09e9e8..95e6ca0 100644
+--- a/R/heatplot.R
++++ b/R/heatplot.R
+@@ -37,6 +37,7 @@ setMethod(
+ heatplot.enrichResult <- function(
+     x,
+     showCategory = 30,
++    showTop = NULL,
+     symbol = "rect",
+     foldChange = NULL,
+     pvalue = NULL,
+@@ -50,6 +51,12 @@ heatplot.enrichResult <- function(
+ 
+     n <- update_n(x, showCategory)
+     geneSets <- extract_geneSets(x, n)
++    if(!is.null(showTop) && showTop > 0) {
++      nfreq <- table(unlist(geneSets))
++      nfc <- nfreq * abs(foldChange[ names(nfreq) ])
++      topgenes <- head(names(sort(nfc,decreasing=TRUE)), showTop)
++      geneSets <- lapply(geneSets, function(s) intersect(s, topgenes))
++    }
+     foldChange <- fc_readable(x, foldChange)
+     pvalue <- fc_readable(x, pvalue)
+     d <- list2df(geneSets)
+@@ -127,6 +134,7 @@ heatplot.enrichResult <- function(
+             set_enrichplot_color(
+                 colors = get_enrichplot_color(3),
+                 type = "fill",
++                reverse = FALSE,
+                 transform = 'identity'
+             )
+     }
+diff --git a/R/treeplot.R b/R/treeplot.R
+index fa38831..1af28a9 100644
+--- a/R/treeplot.R
++++ b/R/treeplot.R
+@@ -45,6 +45,7 @@ treeplot_internal <- function(
+     x,
+     showCategory = 30,
+     color = "p.adjust",
++    size_var = c("Count","setSize"),
+     nCluster = 5,
+     cluster_method = "ward.D",
+     label_format = 30,
+@@ -83,11 +84,13 @@ treeplot_internal <- function(
+     # Hierarchical clustering
+     hc <- hclust(as.dist(1 - termsim2), method = cluster_method)
+     clus <- cutree(hc, nCluster)
+-
++  
+     # Prepare data for plotting
+-    d <- x[keep, c(color, "Count")]
++    size_var <- intersect(size_var, colnames(x[]))[1]
++    d <- x[keep, c(color, size_var)]
++    colnames(d) <- c(color, "size")
+     d$label <- names(clus)
+-    d <- d[, c("label", color, "Count")]
++    d <- d[, c("label", color, "size")]
+ 
+     # Create tree plot
+     p <- create_tree_plot(
+@@ -102,6 +105,7 @@ treeplot_internal <- function(
+         hilight = hilight,
+         align = align,
+         color_var = color,
++        size_var = "size",
+         tiplab_offset = tiplab_offset,
+         cladelab_offset = cladelab_offset
+     )
+@@ -109,7 +113,7 @@ treeplot_internal <- function(
+     # Add styling
+     p <- p +
+         scale_size_continuous(
+-            name = "number of genes",
++            name = size_var,
+             range = c(3, 8)
+         ) +
+         ggtree::hexpand(ratio = hexpand) +
+@@ -381,6 +385,7 @@ create_tree_plot <- function(
+     hilight,
+     align = 'left',
+     color_var,
++    size_var = 'size',
+     tiplab_offset = 0.2,
+     cladelab_offset,
+     add_tippoint = TRUE
+@@ -428,8 +433,14 @@ create_tree_plot <- function(
+     if (add_tippoint) {
+         p <- p +
+             ggnewscale::new_scale_colour() +
+-            geom_tippoint(aes(color = .data[[color_var]], size = .data$Count)) +
+-            set_enrichplot_color(transform = 'log10')
++          geom_tippoint(aes(color = .data[[color_var]], size = .data[['size']]))
++        if(color_var %in% c("pvalue","qvalue","p.adjust")) {
++            p <- p + set_enrichplot_color(transform = 'log10')
++        } else {
++            p <- p + set_enrichplot_color(
++                colors = rev(get_enrichplot_color(3)),
++            )
++        }
+     }
+ 
+     p <- p +

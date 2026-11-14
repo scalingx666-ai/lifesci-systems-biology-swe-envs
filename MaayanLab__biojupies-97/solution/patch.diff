@@ -1,0 +1,734 @@
+diff --git a/server/app/app.py b/server/app/app.py
+index dc221de3..c85f0636 100644
+--- a/server/app/app.py
++++ b/server/app/app.py
+@@ -204,6 +204,8 @@ def download():
+ 
+ 	# Load HDF5 File
+ 	h5 = '/download/{gse}-{platform}.h5'.format(**request.args.to_dict())
++	os.makedirs(os.path.dirname(h5), exist_ok=True)
++
+ 	with open(h5, 'wb') as openfile:
+ 		openfile.write(urllib.request.urlopen('https://storage.googleapis.com/archs4-packages-{}/'.format(request.args.get('version'))+h5.split('/')[-1]).read())
+ 	f = h5py.File(h5, 'r')
+@@ -350,8 +352,8 @@ def samples():
+ 				tables['sample_v6'].columns['sample_title'],
+ 				tables['sample_v6'].columns['sample_accession'].label('gsm'),
+ 				tables['platform_v6'].columns['platform_accession'].label('gpl')) \
+-			.join(tables['sample_v6']) \
+-			.join(tables['platform_v6']) \
++			.join(tables['sample_v6'], tables['sample_v6'].columns['dataset_fk'] == tables['dataset_v6'].columns['id']) \
++			.join(tables['platform_v6'], tables['platform_v6'].columns['id'] == tables['sample_v6'].columns['platform_fk']) \
+ 			.filter(tables['dataset_v6'].columns['dataset_accession'].in_(gse_list)).all()
+ 		session.close()
+ 		if not len(db_query):
+diff --git a/website/.dockerignore b/website/.dockerignore
+new file mode 100644
+index 00000000..2dabec32
+--- /dev/null
++++ b/website/.dockerignore
+@@ -0,0 +1,3 @@
++.config/gcloud/application_default_credentials.json
++.env
++venv
+\ No newline at end of file
+diff --git a/website/.env.example b/website/.env.example
+new file mode 100644
+index 00000000..79d817cc
+--- /dev/null
++++ b/website/.env.example
+@@ -0,0 +1,15 @@
++APPLICATION_DEFAULT_CREDENTIALS='{"client_id": "","client_secret": "","refresh_token": "","type": ""}'
++ELYSIUM_PASSWORD=
++ELYSIUM_USERNAME=
++ENTRY_POINT=/biojupies
++GCLOUD_PROJECT=
++GOOGLE_APPLICATION_CREDENTIALS=.config/gcloud/application_default_credentials.json
++GOOGLE_OAUTH_CLIENT_ID=
++GOOGLE_OAUTH_CLIENT_SECRET=
++SECRET_KEY=
++SENTRY_DSN=
++SQLALCHEMY_DATABASE_URI=
++SQLALCHEMY_DATABASE_URI2=
++UNDER_MAINTENANCE=False
++DEV=true
++NOTEBOOK_GENERATOR=
+\ No newline at end of file
+diff --git a/website/.gitignore b/website/.gitignore
+new file mode 100644
+index 00000000..2dabec32
+--- /dev/null
++++ b/website/.gitignore
+@@ -0,0 +1,3 @@
++.config/gcloud/application_default_credentials.json
++.env
++venv
+\ No newline at end of file
+diff --git a/website/Dockerfile b/website/Dockerfile
+index 9aa77e2c..09df5405 100644
+--- a/website/Dockerfile
++++ b/website/Dockerfile
+@@ -1,4 +1,4 @@
+-FROM ubuntu:17.10
++FROM ubuntu:18.04
+ 
+ MAINTAINER Denis Torre <denis.torre@mssm.com>
+ 
+diff --git a/website/app/app.py b/website/app/app.py
+index 508f050b..9eb57bc8 100644
+--- a/website/app/app.py
++++ b/website/app/app.py
+@@ -21,7 +21,7 @@
+ from flask_sqlalchemy import SQLAlchemy
+ # from flask_dance.contrib.github import make_github_blueprint, github
+ from flask_dance.contrib.google import make_google_blueprint, google
+-from flask_dance.consumer.backend.sqla import OAuthConsumerMixin, SQLAlchemyBackend
++from flask_dance.consumer.storage.sqla import OAuthConsumerMixin, SQLAlchemyStorage
+ from flask_dance.consumer import oauth_authorized, oauth_error
+ from flask_login import (
+ 	LoginManager, UserMixin, current_user,
+@@ -62,9 +62,10 @@
+ 	sentry_sdk.init(dsn=os.environ['SENTRY_DSN'], integrations=[FlaskIntegration()])
+ 
+ # General
+-with open('dev.txt') as openfile:
+-	dev = openfile.read() == 'True'
+-entry_point = '/biojupies-dev' if dev else '/biojupies'
++dev = json.loads(os.environ.get('DEV', 'false'))
++entry_point = os.environ.get('ENTRY_POINT', '/biojupies-dev' if dev else '/biojupies')
++notebook_generator = os.environ.get('NOTEBOOK_GENERATOR', 'http://amp.pharm.mssm.edu/notebook-generator-server{}'.format('-dev' if dev else ''))
++
+ app = Flask(__name__, static_url_path='/app/static')
+ 
+ # Database
+@@ -77,6 +78,9 @@
+ metadata.reflect(bind=engine)
+ tables = metadata.tables
+ 
++app.jinja_env.globals['DEV'] = dev
++app.jinja_env.globals['NOTEBOOK_GENERATOR'] = notebook_generator
++
+ ##### 2. Functions #####
+ # Longest common substring
+ def common_start(sa, sb):
+@@ -106,7 +110,10 @@ def __call__(self, environ, start_response):
+ 		else:
+ 			start_response('404', [('Content-Type', 'text/plain')])
+ 			return ["This url does not belong to the app.".encode()]
+-app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=entry_point)
++
++# only apply prefix middleware if we actually need it
++if entry_point.strip('/') != '':
++	app.wsgi_app = PrefixMiddleware(app.wsgi_app, prefix=entry_point)
+ 
+ # HTTPS fix
+ if not os.environ.get('OAUTHLIB_INSECURE_TRANSPORT'):
+@@ -165,7 +172,7 @@ def load_user(user_id):
+ 	return User.query.get(int(user_id))
+ 
+ # Setup SQLAlchemy backend
+-blueprint.backend = SQLAlchemyBackend(OAuth, db.session, user=current_user)
++blueprint.backend = SQLAlchemyStorage(OAuth, db.session, user=current_user)
+ 
+ # create/login local user on successful OAuth login
+ @oauth_authorized.connect_via(blueprint)
+@@ -411,8 +418,7 @@ def add_tools():
+ 		nr_tools = len(tools)
+ 
+ 		# Version
+-		dev_str = '-dev' if dev else ''
+-		req =  urllib.request.Request('http://amp.pharm.mssm.edu/notebook-generator-server{}/api/version'.format(dev_str)) # this will make the method "POST"
++		req =  urllib.request.Request('{}/api/version'.format(notebook_generator)) # this will make the method "POST"
+ 		version = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))['latest_library_version']
+ 		
+ 		# Return result
+@@ -457,8 +463,8 @@ def configure_analysis():
+ 						tables['sample_v6'].columns['sample_accession'].label('accession'),
+ 						tables['sample_metadata_v6'].columns['variable'], \
+ 						tables['sample_metadata_v6'].columns['value']) \
+-					.join(tables['dataset_v6']) \
+-					.join(tables['sample_metadata_v6']) \
++					.join(tables['dataset_v6'], tables['dataset_v6'].columns['id'] == tables['sample_v6'].columns['dataset_fk']) \
++					.join(tables['sample_metadata_v6'], tables['sample_metadata_v6'].columns['sample_fk'] == tables['sample_v6'].columns['id']) \
+ 					.filter(tables['dataset_v6'].columns['dataset_accession'] == request.form.get('gse')).all()
+ 				session.close()
+ 
+@@ -477,8 +483,8 @@ def configure_analysis():
+ 						tables['user_sample'].columns['sample_name'].label('sample'),
+ 						tables['user_sample_metadata'].columns['variable'], \
+ 						tables['user_sample_metadata'].columns['value']) \
+-					.join(tables['user_dataset']) \
+-					.join(tables['user_sample_metadata']) \
++					.join(tables['user_dataset'], tables['user_dataset'].columns['id'] == tables['user_sample'].columns['user_dataset_fk']) \
++					.join(tables['user_sample_metadata'], tables['user_sample_metadata'].columns['user_sample_fk'] == tables['user_sample'].columns['id']) \
+ 					.filter(tables['user_dataset'].columns['dataset_uid'] == request.form.get('uid')).all()
+ 				session.close()
+ 
+@@ -502,8 +508,8 @@ def configure_analysis():
+ 					tables['parameter'].columns['parameter_description'], \
+ 					tables['parameter_value'].columns['value'], \
+ 					tables['parameter_value'].columns['default']) \
+-				.outerjoin(tables['parameter']) \
+-				.outerjoin(tables['parameter_value']) \
++				.outerjoin(tables['parameter'], tables['parameter'].columns['tool_fk'] == tables['tool'].columns['id']) \
++				.outerjoin(tables['parameter_value'], tables['parameter_value'].columns['parameter_fk'] == tables['parameter'].columns['id']) \
+ 				.filter(tables['tool'].columns['tool_string'].in_(tools)).all()
+ 			session.close()
+ 			p = pd.DataFrame(db_query).set_index(['tool_string'])#pd.read_sql_query('SELECT tool_name, tool_string, tool_description, parameter_name, parameter_description, parameter_string, value, `default` FROM tool t LEFT JOIN parameter p ON t.id=p.tool_fk LEFT JOIN parameter_value pv ON p.id=pv.parameter_fk WHERE t.tool_string IN {}'.format(tool_query_string), engine).set_index(['tool_string'])#.set_index(['tool_name', 'parameter_name', 'parameter_description', 'parameter_string'])
+@@ -597,8 +603,7 @@ def generate_notebook():
+ 		tags = tags if isinstance(tags, list) else [tags]
+ 
+ 		# Version
+-		dev_str = '-dev' if dev else ''
+-		req =  urllib.request.Request('http://amp.pharm.mssm.edu/notebook-generator-server{}/api/version'.format(dev_str)) # this will make the method "POST"
++		req =  urllib.request.Request('{}/api/version'.format(notebook_generator)) # this will make the method "POST"
+ 		version = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))['latest_library_version']
+ 
+ 		# Get source
+@@ -629,7 +634,7 @@ def generate_notebook():
+ 		expected_time = int(np.ceil(np.percentile(wait_times, 90)/60))
+ 		
+ 		# Return result
+-		return render_template('analyze/results.html', notebook_configuration=json.dumps(c), notebook_configuration_dict=c, selected_tools=selected_tools, dev=dev, expected_time=expected_time)
++		return render_template('analyze/results.html', notebook_configuration=json.dumps(c), notebook_configuration_dict=c, selected_tools=selected_tools, expected_time=expected_time)
+ 		# return json.dumps(c)
+ 
+ 	# Redirect to analyze page
+@@ -725,7 +730,7 @@ def ontology_api():
+ 	# Initialize database query
+ 	session = Session()
+ 	db_query = session.query(tables['ontology_term']) \
+-					.join(tables['ontology']) \
++					.join(tables['ontology'], tables['ontology'].columns['id'] == tables['ontology_term'].columns['ontology_fk']) \
+ 					.filter(tables['ontology'].columns['ontology_string'].in_(ontologies))#.limit(5)
+ 	# Finish query
+ 	query_dataframe = pd.DataFrame(db_query.all()).drop(['ontology_fk'], axis=1).fillna('')
+@@ -873,7 +878,7 @@ def upload_reads():
+ 			if (upload_user_id and ((current_user.get_id() and int(current_user.get_id()) in (upload_user_id, 3))) or (not upload_user_id)):
+ 
+ 				# Get samples
+-				req =  urllib.request.Request('https://amp.pharm.mssm.edu/charon/files?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}'.format(**os.environ))
++				req =  urllib.request.Request('https://amp.pharm.mssm.edu/charon/files?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&prefix={upload_uid}'.format(**os.environ, **locals()))
+ 				uploaded_files = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))['filenames']
+ 				samples = [x for x in uploaded_files if x.startswith(upload_uid) and (x.endswith('.fastq.gz') or x.endswith('.fq.gz'))]
+ 
+@@ -894,8 +899,8 @@ def upload_reads():
+ 
+ 		# Find alignment
+ 		session = Session()
+-		alignment_data = session.query(tables['fastq_upload'].columns['user_fk'], tables['fastq_alignment'].columns['deleted']).join(tables['fastq_alignment']).filter(tables['fastq_alignment'].columns['alignment_uid'] == alignment_uid).first()
+-		# alignment_user_id = session.query(tables['fastq_upload'].columns['user_fk']).join(tables['fastq_alignment']).filter(tables['fastq_alignment'].columns['alignment_uid'] == alignment_uid).first()
++		alignment_data = session.query(tables['fastq_upload'].columns['user_fk'], tables['fastq_alignment'].columns['deleted']).join(tables['fastq_alignment'], tables['fastq_alignment'].columns['fastq_upload_fk'] == tables['fastq_upload'].columns['id']).filter(tables['fastq_alignment'].columns['alignment_uid'] == alignment_uid).first()
++		# alignment_user_id = session.query(tables['fastq_upload'].columns['user_fk']).join(tables['fastq_alignment'], tables['fastq_alignment'].columns['fastq_upload_fk'] == tables['fastq_upload'].columns['id']).filter(tables['fastq_alignment'].columns['alignment_uid'] == alignment_uid).first()
+ 		alignment_user_id = alignment_data.user_fk if alignment_data else None
+ 		session.close()
+ 
+@@ -904,7 +909,7 @@ def upload_reads():
+ 
+ 			# Get jobs
+ 			print('performing request...')
+-			req =  urllib.request.Request('https://amp.pharm.mssm.edu/cloudalignment/progress?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}'.format(**os.environ))
++			req =  urllib.request.Request('https://amp.pharm.mssm.edu/cloudalignment/progress?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&prefix={alignment_uid}'.format(**os.environ, **locals()))
+ 			job_dataframe = pd.DataFrame(json.loads(urllib.request.urlopen(req).read().decode('utf-8'))).T
+ 			print('done!')
+ 			jobs = job_dataframe.loc[[index for index, rowData in job_dataframe.iterrows() if rowData['outname'].startswith(alignment_uid)]].to_dict(orient='records')
+@@ -1096,21 +1101,14 @@ def launch_alignment_api():
+ 		# Add species
+ 		sample['outname'] = alignment_uid+'-'+sample['outname']+'-'+alignment_settings['organism'].replace('human', 'hs').replace('mouse', 'mm')
+ 
+-		# Get jobs
+-		req =  urllib.request.Request('https://amp.pharm.mssm.edu/cloudalignment/progress?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}'.format(**os.environ))
+-		job_dataframe = pd.DataFrame(json.loads(urllib.request.urlopen(req).read().decode('utf-8'))).T[['outname', 'status']]
+-
+-		# Check if alignment hasn't been submitted yet (fix to add support for different organisms)
+-		if sample['outname'] not in job_dataframe['outname'].tolist():
+-
+-			# Get URL parameters
+-			params = '&'.join(['{key}={value}'.format(**locals()) for key, value in sample.items() if value])+'&organism='+alignment_settings['organism']
+-			url = "https://amp.pharm.mssm.edu/cloudalignment/createjob?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&".format(**os.environ)+params
+-			# Launch alignment jobs
+-			req =  urllib.request.Request(urllib.parse.quote(url, safe=':/&.?='))
+-			# req =  urllib.request.Request(url.replace(' ', '%20'))
+-			resp = urllib.request.urlopen(req).read().decode('utf-8')
+-			# print(resp)
++		# Get URL parameters
++		params = '&'.join(['{key}={value}'.format(**locals()) for key, value in sample.items() if value])+'&organism='+alignment_settings['organism']
++		url = "https://amp.pharm.mssm.edu/cloudalignment/createjob?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&".format(**os.environ)+params
++		# Launch alignment jobs
++		req =  urllib.request.Request(urllib.parse.quote(url, safe=':/&.?='))
++		# req =  urllib.request.Request(url.replace(' ', '%20'))
++		resp = urllib.request.urlopen(req).read().decode('utf-8')
++		# print(resp)
+ 
+ 	# Upload to database
+ 	RM.uploadAlignmentJob(alignment_uid=alignment_uid, upload_uid=alignment_settings['upload_uid'], paired=alignment_settings.get('sequencing-type')=='paired-end', species=alignment_settings['organism'].replace('human', 'hs').replace('mouse', 'mm'), alignment_title=alignment_settings.get('alignment_title', 'FASTQ Alignment'), session=Session(), tables=tables)
+@@ -1132,7 +1130,7 @@ def merge_counts_api():
+ 	alignment_uid = request.args.get('alignment_uid')#'RTBO2Vk5xvV'
+ 
+ 	# Get samples
+-	req =  urllib.request.Request('https://amp.pharm.mssm.edu/charon/files?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}'.format(**os.environ))
++	req =  urllib.request.Request('https://amp.pharm.mssm.edu/charon/files?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&prefix={alignment_uid}'.format(**os.environ, **locals()))
+ 	uploaded_files = json.loads(urllib.request.urlopen(req).read().decode('utf-8'))['filenames']
+ 	samples = [x for x in uploaded_files if x.startswith(alignment_uid) and x.endswith('_gene.tsv')]
+ 
+@@ -1215,15 +1213,15 @@ def elysium_api():
+ 
+ 	elif endpoint == 'progress':
+ 
+-		# Build url
+-		url = 'https://amp.pharm.mssm.edu/cloudalignment/{endpoint}?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}'.format(**os.environ, **locals())
+-
+ 		# Get alignment UID
+ 		alignment_uid = request.args.get('alignment_uid')
+ 
+ 		# Check
+ 		if isinstance(alignment_uid, str) and len(alignment_uid) == 11:
+ 
++			# Build url
++			url = 'https://amp.pharm.mssm.edu/cloudalignment/{endpoint}?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&prefix={alignment_uid}'.format(**os.environ, **locals())
++
+ 			# Get job dataframe
+ 			job_dataframe = pd.DataFrame(json.loads(urllib.request.urlopen(urllib.request.Request(url)).read().decode('utf-8'))).T
+ 			
+@@ -1395,7 +1393,22 @@ def example():
+ 
+ 	# Select dataset
+ 	dataset_accession = 'GSE88741'
+-	dataset = pd.read_sql_query('SELECT platform_accession, dataset_accession, dataset_title, summary, date, count(*) AS nr_samples, organism FROM dataset_v6 d LEFT JOIN sample_v6 s ON d.id=s.dataset_fk LEFT JOIN platform_v6 p ON p.id=s.platform_fk WHERE dataset_accession = "{}"'.format(dataset_accession), engine).drop_duplicates().T.to_dict()[0]
++	dataset = pd.read_sql_query('''
++	SELECT
++		platform_accession,
++		dataset_accession,
++		dataset_title,
++		summary,
++		date,
++		count(*) AS nr_samples,
++		organism
++	FROM
++		dataset_v6 d
++	LEFT JOIN sample_v6 s ON d.id = s.dataset_fk
++	LEFT JOIN platform_v6 p ON p.id = s.platform_fk
++	WHERE dataset_accession = "{}"
++	GROUP BY d.id, p.id
++	'''.format(dataset_accession), engine).drop_duplicates().T.to_dict()[0]
+ 	# dataset['date'] = dataset['date'].strftime('%b %d, %Y')
+ 	return render_template('analyze/example.html', dataset=dataset)
+ 
+@@ -1458,20 +1471,25 @@ def dashboard():
+ 		session = Session()
+ 
+ 		# Get datasets
+-		datasets = session.query(tables['user_dataset'], func.count(tables['user_sample'].columns['id']).label('samples')).join(tables['user_sample']).filter(and_(tables['user_dataset'].columns['user_fk'] == user_id, tables['user_dataset'].columns['deleted'] == 0)).group_by(tables['user_dataset'].columns['id']).order_by(tables['user_dataset'].columns['date'].desc()).all()
++		datasets = session.query(tables['user_dataset'], func.count(tables['user_sample'].columns['id']).label('samples')).join(tables['user_sample'], tables['user_sample'].columns['user_dataset_fk'] == tables['user_dataset'].columns['id']).filter(and_(tables['user_dataset'].columns['user_fk'] == user_id, tables['user_dataset'].columns['deleted'] == 0)).group_by(tables['user_dataset'].columns['id']).order_by(tables['user_dataset'].columns['date'].desc()).all()
+ 
+ 		# Get notebooks
+ 		notebooks = session.query(tables['notebook']).filter(and_(tables['notebook'].columns['user_fk'] == user_id, tables['notebook'].columns['deleted'] == 0)).order_by(tables['notebook'].columns['date'].desc()).all()
+ 
+ 		# Get alignment jobs
+-		alignments = session.query(tables['fastq_alignment']).join(tables['fastq_upload']).filter(and_(tables['fastq_upload'].columns['user_fk'] == user_id, tables['fastq_alignment'].columns['deleted'] == 0)).order_by(tables['fastq_alignment'].columns['date'].asc()).all()
++		alignments = session.query(tables['fastq_alignment']).join(tables['fastq_upload'], tables['fastq_upload'].columns['id'] == tables['fastq_alignment'].columns['fastq_upload_fk']).filter(and_(tables['fastq_upload'].columns['user_fk'] == user_id, tables['fastq_alignment'].columns['deleted'] == 0)).order_by(tables['fastq_alignment'].columns['date'].asc()).all()
+ 
+ 		# Get statuses
+ 		if alignments:
+ 
+ 			# Get progress
+-			req =  urllib.request.Request('https://amp.pharm.mssm.edu/cloudalignment/progress?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}'.format(**os.environ))
+-			progress_dataframe = pd.DataFrame(json.loads(urllib.request.urlopen(req).read().decode('utf-8'))).T[['outname', 'status']]
++			resp = {}
++			for alignment in alignments:
++				alignment_uid = alignment.alignment_uid
++				req = urllib.request.Request('https://amp.pharm.mssm.edu/cloudalignment/progress?username={ELYSIUM_USERNAME}&password={ELYSIUM_PASSWORD}&prefix={alignment_uid}'.format(**os.environ, **locals()))
++				resp = dict(**resp, **json.loads(urllib.request.urlopen(req).read().decode('utf-8')))
++
++			progress_dataframe = pd.DataFrame(resp).T[['outname', 'status']]
+ 			progress_dataframe['split'] = [x.split('-')[0] for x in progress_dataframe['outname']]
+ 			progress_dataframe['sample_name'] = [x.split('-', 2)[-1].split('-', -1)[0] if '-' in x else '' for x in progress_dataframe['outname']]
+ 			progress = progress_dataframe[progress_dataframe['split'].isin(alignment.alignment_uid for alignment in alignments)].groupby('split')[['sample_name', 'status']].apply(lambda x: x.sort_values('sample_name').to_dict(orient='records')).to_dict()
+@@ -1496,7 +1514,7 @@ def dashboard():
+ 		# Close session
+ 		session.close()
+ 
+-		return render_template('user/dashboard.html', datasets=datasets, notebooks=notebooks, alignments=alignments, dev=dev)
++		return render_template('user/dashboard.html', datasets=datasets, notebooks=notebooks, alignments=alignments)
+ 
+ #############################################
+ ########## 2. Private API
+diff --git a/website/app/static/py/Query.py b/website/app/static/py/Query.py
+index de757e2b..6207161b 100644
+--- a/website/app/static/py/Query.py
++++ b/website/app/static/py/Query.py
+@@ -71,9 +71,10 @@ def searchGEO(q):
+ def searchDatasets(session, tables, min_samples, max_samples, organisms, sortby='asc', q=None):
+ 
+     # Build database query
+-    db_query = session.query(tables['dataset_v6'], tables['platform_v6'], func.count(tables['sample_v6'].columns['sample_accession']).label('nr_samples')) \
+-                    .join(tables['sample_v6']) \
+-                    .join(tables['platform_v6'])
++    nr_samples_label = func.count(tables['sample_v6'].columns['sample_accession']).label('nr_samples')
++    db_query = session.query(tables['dataset_v6'], tables['platform_v6'], nr_samples_label) \
++                    .join(tables['sample_v6'], tables['sample_v6'].columns['dataset_fk'] == tables['dataset_v6'].columns['id']) \
++                    .join(tables['platform_v6'], tables['platform_v6'].columns['id'] == tables['sample_v6'].columns['platform_fk'])
+ 
+     # Add filters
+     if q:
+@@ -85,18 +86,18 @@ def searchDatasets(session, tables, min_samples, max_samples, organisms, sortby=
+                     ))
+ 
+     # Group query
+-    db_query = db_query.group_by(tables['dataset_v6'].columns['dataset_accession']) \
++    db_query = db_query.group_by(tables['dataset_v6'].columns['id'], tables['platform_v6'].columns['id']) \
+                 .having(and_( \
+                     tables['platform_v6'].columns['organism'].in_(organisms), \
+-                    func.count(tables['sample_v6'].columns['sample_accession']) >= min_samples,
+-                    func.count(tables['sample_v6'].columns['sample_accession']) <= max_samples
++                    nr_samples_label >= min_samples,
++                    nr_samples_label <= max_samples
+                 ))
+ 
+     # Sort query results
+     if sortby == 'asc':
+-        db_query = db_query.order_by(func.count(tables['sample_v6'].columns['sample_accession']).asc())
++        db_query = db_query.order_by(nr_samples_label).asc()
+     elif sortby == 'desc':
+-        db_query = db_query.order_by(func.count(tables['sample_v6'].columns['sample_accession']).desc())
++        db_query = db_query.order_by(nr_samples_label).desc()
+     elif sortby == 'new':
+         db_query = db_query.order_by(tables['dataset_v6'].columns['date'].desc())
+ 
+diff --git a/website/app/static/py/TableManager.py b/website/app/static/py/TableManager.py
+index 307929b1..b122ee8d 100644
+--- a/website/app/static/py/TableManager.py
++++ b/website/app/static/py/TableManager.py
+@@ -72,6 +72,7 @@ def buildH5(data, dataset_uid):
+ 
+ 	# Get outfile
+ 	outfile = os.path.join('app/static/uploads/h5', dataset_uid+'.h5')
++	os.makedirs(os.path.dirname(outfile), exist_ok=True)
+ 
+ 	# Try
+ 	try:
+diff --git a/website/app/templates/analyze/results.html b/website/app/templates/analyze/results.html
+index 072faa2b..fe5efb94 100644
+--- a/website/app/templates/analyze/results.html
++++ b/website/app/templates/analyze/results.html
+@@ -192,7 +192,7 @@
+ 	generate_notebook = function(notebook_configuration) {
+ 
+ 		$.ajax({	
+-			url: "https://amp.pharm.mssm.edu/notebook-generator-server{{ '-dev' if dev else '' }}/api/generate",
++			url: "{{ NOTEBOOK_GENERATOR }}/api/generate",
+ 			method: "POST",
+ 			data: notebook_configuration,
+ 			// data: $('#notebook-configuration').val(),
+@@ -298,7 +298,7 @@
+ 
+ 					// Ajax call
+ 					$.ajax({
+-						url: "https://amp.pharm.mssm.edu/notebook-generator-server{{ '-dev' if dev else '' }}/api/help",
++						url: "{{ NOTEBOOK_GENERATOR }}/api/help",
+ 						method: "POST",
+ 						data: $('#help-form').serialize(),
+ 						dataType: 'json',
+diff --git a/website/app/templates/base.html b/website/app/templates/base.html
+index ec4c13a6..d738217a 100644
+--- a/website/app/templates/base.html
++++ b/website/app/templates/base.html
+@@ -220,8 +220,10 @@ <h5 class="modal-title medium" id="exampleModalLabel">Sign In</h5>
+     <script src="{{ url_for('static', filename='js/scripts.js') }}"></script>
+     <script type="text/javascript" src="//s7.addthis.com/js/300/addthis_widget.js#pubid=ra-5ac68efa480add22"></script>
+ 
++    {% if not DEV %}
+     <!-- HTTPS -->
+     <script type="text/javascript">if ((location.protocol != 'https:') && (location.hostname != 'localhost')){ location.href = 'https:' + window.location.href.substring(window.location.protocol.length);}</script>
++    {% endif %}
+ 
+     <!-- Footer Block -->
+     {% block footer %}{% endblock %}
+diff --git a/website/app/templates/user/dashboard.html b/website/app/templates/user/dashboard.html
+index e09a6d8b..d83b7d78 100644
+--- a/website/app/templates/user/dashboard.html
++++ b/website/app/templates/user/dashboard.html
+@@ -303,7 +303,7 @@ <h5 class="modal-title">Download the dataset</h5>
+         </button>
+       </div>
+       <div class="modal-body">
+-        <form id="download-dataset-form" action="https://amp.pharm.mssm.edu/notebook-generator-server{{ '-dev' if dev else '' }}/download_data" method="post">
++        <form id="download-dataset-form" action="{{ NOTEBOOK_GENERATOR }}/download_data" method="post">
+             <input type="hidden" name="uid" value="">
+             <input type="hidden" name="source" value="upload">
+ 
+diff --git a/website/boot.sh b/website/boot.sh
+index 9b915a62..ba91646c 100644
+--- a/website/boot.sh
++++ b/website/boot.sh
+@@ -59,6 +59,41 @@ http {
+         sendfile on;
+         keepalive_timeout 0;
+         large_client_header_buffers 8 32k;
++        location /static  {
++            alias $root/app/static;
++        }
++        location / {
++            include            /etc/nginx/uwsgi_params;
++            uwsgi_pass         127.0.0.1:8080;
++            proxy_redirect     off;
++            proxy_set_header   Host \$host;
++            proxy_set_header   X-Real-IP \$remote_addr;
++            proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
++            proxy_set_header   X-Forwarded-Host \$server_name;
++        }
++    }
++EOF
++
++if [ ! -z "${SSL}" ]; then
++
++cat << EOF | tee -a $root/nginx.conf >> $log
++
++    server {
++        listen 443 default ssl;
++
++        # ssl on;
++        ssl_certificate $sslroot/cert.crt;
++        ssl_certificate_key $sslroot/cert.key;
++        ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
++        ssl_prefer_server_ciphers on;
++        ssl_ciphers 'EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH';
++
++        include /etc/nginx/mime.types;
++        charset utf-8;
++        client_max_body_size 30M;
++        sendfile on;
++        keepalive_timeout 0;
++        large_client_header_buffers 8 32k;
+ 
+         location /static  {
+             alias $root/app/static;
+@@ -74,6 +109,11 @@ http {
+             proxy_set_header   X-Forwarded-Host \$server_name;
+         }
+     }
++EOF
++
++fi
++
++cat << EOF | tee -a $root/nginx.conf >> $log
+ }
+ EOF
+ 
+diff --git a/website/dev.txt b/website/dev.txt
+deleted file mode 100644
+index 4791ed55..00000000
+--- a/website/dev.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-True
+\ No newline at end of file
+diff --git a/website/pkglist.txt b/website/pkglist.txt
+index 2be6e153..45615aba 100644
+--- a/website/pkglist.txt
++++ b/website/pkglist.txt
+@@ -1,9 +1,19 @@
++build-essential
++curl
++libcairo2-dev
++libffi-dev
++libgif-dev
++libgirepository1.0-dev
++libjpeg-dev
++libmysqlclient-dev
++libpango1.0-dev
++libpcre3
++libpcre3-dev
++librsvg2-dev
++libssl-dev
++nginx
+ python3
+-python3-pip
+ python3-dev
+-libmysqlclient-dev
++python3-pip
+ python3-setuptools
+-nginx
+-uwsgi-core
+-libpcre3
+-libpcre3-dev
+\ No newline at end of file
++uwsgi-core
+\ No newline at end of file
+diff --git a/website/requirements.txt b/website/requirements.txt
+index 11903a20..6caca625 100644
+--- a/website/requirements.txt
++++ b/website/requirements.txt
+@@ -1,89 +1,92 @@
+-asn1crypto==0.22.0
+-beautifulsoup4==4.6.3
++asn1crypto==0.24.0
++beautifulsoup4==4.8.0
+ blinker==1.4
+ bs4==0.0.1
+-cachetools==2.0.1
+-certifi==2018.1.18
++cachetools==3.1.1
++certifi==2019.6.16
+ chardet==3.0.4
+-click==6.7
+-cryptography==1.9
+-dill==0.2.7.1
+-Flask==0.12.2
+-Flask-Dance==1.1.0
++Click==7.0
++cryptography==2.1.4
++dill==0.3.0
++Flask==1.1.1
++Flask-Dance==2.2.0
+ Flask-Login==0.4.1
+-Flask-SQLAlchemy==2.3.2
+-future==0.16.0
+-gapic-google-cloud-datastore-v1==0.15.3
++Flask-SQLAlchemy==2.4.0
++future==0.17.1
++gapic-google-cloud-datastore-v1==0.90.4
+ gapic-google-cloud-error-reporting-v1beta1==0.15.3
+ gapic-google-cloud-logging-v2==0.91.3
+-google-api-core==0.1.4
+-google-auth==1.4.1
+-google-cloud==0.32.0
+-google-cloud-bigquery==0.28.0
+-google-cloud-bigquery-datatransfer==0.1.1
+-google-cloud-bigtable==0.28.1
+-google-cloud-container==0.1.1
+-google-cloud-core==0.28.1
+-google-cloud-datastore==1.4.0
+-google-cloud-dns==0.28.0
+-google-cloud-error-reporting==0.28.0
+-google-cloud-firestore==0.28.0
+-google-cloud-language==1.0.1
+-google-cloud-logging==1.4.0
+-google-cloud-monitoring==0.28.1
+-google-cloud-pubsub==0.30.1
+-google-cloud-resource-manager==0.28.1
+-google-cloud-runtimeconfig==0.28.1
+-google-cloud-spanner==0.29.0
+-google-cloud-speech==0.30.0
+-google-cloud-storage==1.6.0
+-google-cloud-trace==0.17.0
+-google-cloud-translate==1.3.1
+-google-cloud-videointelligence==1.0.1
+-google-cloud-vision==0.29.0
+-google-gax==0.15.16
+-google-resumable-media==0.3.1
+-googleapis-common-protos==1.5.3
+-grpc-google-iam-v1==0.11.4
+-grpcio==1.10.0
+-h5py==2.7.1
+-httplib2==0.11.3
+-idna==2.5
+-itsdangerous==0.24
+-Jinja2==2.10
+-keyring==10.4.0
+-keyrings.alt==2.2
+-lazy==1.3
+-lxml==4.2.5
+-MarkupSafe==1.0
+-numpy==1.14.2
+-oauth2client==3.0.0
+-oauthlib==2.1.0
+-pandas==0.22.0
+-ply==3.8
++google-api-core==1.14.2
++google-auth==1.6.3
++google-cloud==0.34.0
++google-cloud-bigquery==1.18.0
++google-cloud-bigquery-datatransfer==0.4.1
++google-cloud-bigtable==0.34.0
++google-cloud-container==0.3.0
++google-cloud-core==1.0.3
++google-cloud-datastore==1.9.0
++google-cloud-dns==0.30.2
++google-cloud-error-reporting==0.32.0
++google-cloud-firestore==1.4.0
++google-cloud-language==1.3.0
++google-cloud-logging==1.12.1
++google-cloud-monitoring==0.33.0
++google-cloud-pubsub==0.45.0
++google-cloud-resource-manager==0.29.2
++google-cloud-runtimeconfig==0.29.2
++google-cloud-spanner==1.10.0
++google-cloud-speech==1.2.0
++google-cloud-storage==1.18.0
++google-cloud-trace==0.22.1
++google-cloud-translate==1.6.0
++google-cloud-videointelligence==1.11.0
++google-cloud-vision==0.39.0
++google-gax==0.16.0
++google-resumable-media==0.3.3
++googleapis-common-protos==1.6.0
++grpc-google-iam-v1==0.12.3
++grpcio==1.28.1
++h5py==2.10.0
++httplib2==0.13.1
++idna==2.6
++itsdangerous==1.1.0
++Jinja2==2.10.1
++keyring==21.2.1
++keyrings.alt==3.4.0
++lazy==1.4
++lxml==4.5.0
++MarkupSafe==1.1.1
++numpy==1.18.4
++oauth2client==4.1.3
++oauthlib==3.1.0
++pandas==1.0.3
++ply==3.11
+ proto-google-cloud-datastore-v1==0.90.4
+ proto-google-cloud-error-reporting-v1beta1==0.15.3
+ proto-google-cloud-logging-v2==0.91.3
+-protobuf==3.5.2.post1
+-psutil==5.4.3
+-pyasn1==0.4.2
+-pyasn1-modules==0.2.1
++protobuf==3.9.1
++psutil==5.7.0
++pyasn1==0.4.6
++pyasn1-modules==0.2.6
++pycairo==1.19.1
+ pycrypto==2.6.1
+-pygobject==3.24.1
+-PyMySQL==0.8.0
+-python-dateutil==2.7.0
+-pytz==2018.3
+-pyxdg==0.25
+-requests==2.18.4
+-requests-oauthlib==1.0.0
+-rsa==3.4.2
+-SecretStorage==2.3.1
+-sentry-sdk==0.3.5
+-six==1.10.0
+-SQLAlchemy==1.2.5
+-SQLAlchemy-Utils==0.33.6
+-urllib3==1.22
++PyGObject==3.36.1
++PyMySQL==0.9.3
++python-dateutil==2.8.1
++python-dotenv==0.13.0
++pytz==2019.2
++pyxdg==0.26
++requests==2.22.0
++requests-oauthlib==1.2.0
++rsa==4.0
++SecretStorage==3.1.2
++sentry-sdk==0.14.3
++six==1.11.0
++soupsieve==1.9.3
++SQLAlchemy==1.3.7
++SQLAlchemy-Utils==0.36.5
++urllib3==1.25.3
+ URLObject==2.4.3
+-uWSGI==2.0.17
+-Werkzeug==0.14.1
+-xlrd==1.1.0
+\ No newline at end of file
++uWSGI==2.0.18
++Werkzeug==0.15.5
++xlrd==1.2.0
+\ No newline at end of file

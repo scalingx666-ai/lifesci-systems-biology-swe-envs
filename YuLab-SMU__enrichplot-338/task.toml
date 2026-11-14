@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/YuLab-SMU__enrichplot-338"
+description = "Add fc_threshold parameter to cnetplot"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "enrichplot",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "YuLab-SMU/enrichplot"
+ref = "5647eb4b7f8bbd330f8155266c747a825def1ae5"
+reference = "https://github.com/YuLab-SMU/enrichplot/pull/338"
+source_access = "auto"
+built_at = "2026-11-14T07:00:41.968757+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:09c43faf29b49c48468ff823a2325eae07ce528fa62883b314f25bb03d8c8d15"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-11-30T07:30:17Z"
+diff_format = "unified"
+context_files = [
+    "R/cnetplot.R",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 13
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

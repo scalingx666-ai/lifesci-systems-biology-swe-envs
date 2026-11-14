@@ -1,0 +1,65 @@
+version = "1.0"
+
+[task]
+name = "default/florianhartig__BayesianTools-276"
+description = "Fix instances where error for \"lost braces\" appear"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "BayesianTools",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "florianhartig/BayesianTools"
+ref = "f65cf7c90694efb60fb32fa1044ccce11a679f1b"
+reference = "https://github.com/florianhartig/BayesianTools/pull/276"
+source_access = "auto"
+built_at = "2026-11-14T07:01:28.515819+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:b2fcb97383c9b260893015e587aa02913ad4d6c3fa6b18558e3f2b498979f3a1"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-03-07T13:15:04Z"
+diff_format = "unified"
+context_files = [
+    "BayesianTools/R/BayesianSetupGenerateParallel.R",
+    "BayesianTools/R/mcmcDEzs.R",
+    "BayesianTools/man/DEzs.Rd",
+    "BayesianTools/man/generateParallelExecuter.Rd",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 20
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,66 @@
+version = "1.0"
+
+[task]
+name = "default/GeomScale__dingo-122"
+description = "Remove mmcs option for generate_steady_states_no_multiphase and fix a warning"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "dingo",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "GeomScale/dingo"
+ref = "cdcb43c888b496ef3b86c1916ae60459dfecace4"
+reference = "https://github.com/GeomScale/dingo/pull/122"
+source_access = "auto"
+built_at = "2026-11-14T07:02:45.384014+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:fa1f5d7d27178d4dc6f577a96ccf0fa02c43053e767fcbbc3bebe675c4c12878"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-02-01T09:40:05Z"
+diff_format = "unified"
+context_files = [
+    "dingo/PolytopeSampler.py",
+    "dingo/bindings/bindings.cpp",
+    "dingo/bindings/bindings.h",
+    "dingo/volestipy.pyx",
+    "tests/sampling_no_multiphase.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 97
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

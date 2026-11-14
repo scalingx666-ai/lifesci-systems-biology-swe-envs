@@ -1,0 +1,71 @@
+version = "1.0"
+
+[task]
+name = "default/AMICI-dev__AMICI-3527"
+description = "Update PEtab benchmark collection repository location"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "AMICI",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "AMICI-dev/AMICI"
+ref = "adfd4b296e7144800f44f5e70a8fdc3091f1701c"
+reference = "https://github.com/AMICI-dev/AMICI/pull/3527"
+source_access = "auto"
+built_at = "2026-11-14T07:01:04.234058+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:1457cb7eee972b5709b2e6f12f344cf1c9889ba08c5f12c3158b847c2c702b17"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-09T20:30:57Z"
+diff_format = "unified"
+context_files = [
+    "binder/Dockerfile",
+    "doc/examples/example_errors.ipynb",
+    "doc/examples/example_jax/ExampleJax.ipynb",
+    "doc/examples/example_jax_petab/ExampleJaxPEtab.ipynb",
+    "doc/examples/example_large_models/example_performance_optimization.ipynb",
+    "doc/examples/example_petab/petab.ipynb",
+    "doc/examples/example_petab/petab_v2.ipynb",
+    "doc/rtd_requirements.txt",
+    "python/sdist/pyproject.toml",
+    "tests/benchmark_models/test_petab_benchmark.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 58
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

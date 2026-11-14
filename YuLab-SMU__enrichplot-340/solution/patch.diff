@@ -1,0 +1,17 @@
+diff --git a/R/ggtable.R b/R/ggtable.R
+index 6a900da..83f1d3a 100644
+--- a/R/ggtable.R
++++ b/R/ggtable.R
+@@ -19,7 +19,11 @@ ggtable <- function(d, p = NULL) {
+ #' @importFrom rlang check_installed
+ tableGrob2 <- function(d, p = NULL, rows=NULL) {
+     # has_package("gridExtra")
+-    d <- d[order(rownames(d)),]
++    order_index <- order(rownames(d))
++    d <- d[order_index,]
++    if (!is.null(rows)) {
++        rows <- rows[order_index]
++    }
+     check_installed('gridExtra', 'for `tableGrob2()`.')
+     tp <- gridExtra::tableGrob(d, rows=rows)
+     if (is.null(p) || is.null(rows)) {

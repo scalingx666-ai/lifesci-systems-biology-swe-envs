@@ -1,0 +1,74 @@
+version = "1.0"
+
+[task]
+name = "default/Noble-Lab__HiCFoundation-10"
+description = "refactor pretrain"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "HiCFoundation",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Noble-Lab/HiCFoundation"
+ref = "d95b2e1204b6f163b522817e4b1d5ff395629769"
+reference = "https://github.com/Noble-Lab/HiCFoundation/pull/10"
+source_access = "auto"
+built_at = "2026-11-14T07:04:01.928472+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:d69ba6321d4342551a0d7331b60d5890b5c1945ef4d5eb46c163410e8632fb54"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2025-08-23T00:08:40Z"
+diff_format = "unified"
+context_files = [
+    "refactor_pretrain/Logger.py",
+    "refactor_pretrain/SSIM.py",
+    "refactor_pretrain/argparser.py",
+    "refactor_pretrain/distribute_utils.py",
+    "refactor_pretrain/main_worker.py",
+    "refactor_pretrain/model_funcs.py",
+    "refactor_pretrain/model_utils.py",
+    "refactor_pretrain/models_hicfoundation.py",
+    "refactor_pretrain/pretrain.py",
+    "refactor_pretrain/pretrain_dataset.py",
+    "refactor_pretrain/train_epoch.py",
+    "refactor_pretrain/utils.py",
+    "refactor_pretrain/val_epoch.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 2848
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

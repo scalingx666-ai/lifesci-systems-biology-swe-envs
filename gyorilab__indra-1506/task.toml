@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/gyorilab__indra-1506"
+description = "Optimize sqlite ontology build size"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "indra",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "gyorilab/indra"
+ref = "c6dfd239e0dc595a79441e781ef16af2a0760278"
+reference = "https://github.com/gyorilab/indra/pull/1506"
+source_access = "auto"
+built_at = "2026-11-14T07:00:58.209557+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:9e34365d63458ae960977e4062abd809c38e4a45327346246570f1225188a821"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-06-19T20:12:54Z"
+diff_format = "unified"
+context_files = [
+    "indra/ontology/bio/sqlite_ontology.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 111
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

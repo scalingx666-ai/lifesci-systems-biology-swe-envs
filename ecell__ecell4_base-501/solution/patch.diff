@@ -1,0 +1,300 @@
+diff --git a/.circleci/config.yml b/.circleci/config.yml
+deleted file mode 100644
+index 442b18e2f..000000000
+--- a/.circleci/config.yml
++++ /dev/null
+@@ -1,60 +0,0 @@
+-version: 2.1
+-executors:
+-  default:
+-    working_directory: ~/circle
+-    docker:
+-      - image: ghcr.io/ecell/image
+-    environment:
+-      ECELLVER: "2.1.0"
+-      BOOSTVER: "1.73.0"
+-      BOOSTFILE: "boost_1_73_0"
+-jobs:
+-  build:
+-    executor: default
+-    parameters:
+-      pyver:
+-        type: enum
+-        enum: ["cp36-cp36m", "cp37-cp37m", "cp38-cp38", "cp39-cp39"]
+-    steps:
+-      - setup_remote_docker
+-      - checkout
+-      - run: |
+-          git submodule sync
+-          git submodule update --init --remote
+-      - run:
+-          name: Install Dependencies
+-          command: |
+-            set -x
+-            curl -L -o $BOOSTFILE.tar.bz2 https://boostorg.jfrog.io/artifactory/main/release/$BOOSTVER/source/$BOOSTFILE.tar.bz2
+-            tar xf $BOOSTFILE.tar.bz2
+-            cd ~/circle
+-      - run:
+-          name: Install auditwheel from source
+-          command: |
+-            git clone https://github.com/pypa/auditwheel.git
+-            /opt/python/<< parameters.pyver >>/bin/python -m pip install ./auditwheel
+-      - run:
+-          name: Build E-Cell4
+-          command: |
+-            export BOOST_INCLUDEDIR=/root/circle/$BOOSTFILE
+-            /opt/python/<< parameters.pyver >>/bin/python setup.py bdist_wheel
+-            /opt/python/<< parameters.pyver >>/bin/auditwheel repair /root/circle/dist/ecell4_base-$ECELLVER-<< parameters.pyver >>-linux_x86_64.whl
+-      - store_artifacts:
+-          path: /root/circle/wheelhouse
+-
+-workflows:
+-  version: 2
+-  build_wheels:
+-    jobs:
+-      - build:
+-          name: build_py36
+-          pyver: cp36-cp36m
+-      - build:
+-          name: build_py37
+-          pyver: cp37-cp37m
+-      - build:
+-          name: build_py38
+-          pyver: cp38-cp38
+-      - build:
+-          name: build_py39
+-          pyver: cp39-cp39
+diff --git a/.github/workflows/wheels.yml b/.github/workflows/wheels.yml
+new file mode 100644
+index 000000000..f3f9c6e2b
+--- /dev/null
++++ b/.github/workflows/wheels.yml
+@@ -0,0 +1,36 @@
++name: Build
++
++on: [push, pull_request]
++
++jobs:
++  build_wheels:
++    name: Build wheels on ${{ matrix.os }}
++    runs-on: ${{ matrix.os }}
++    permissions:
++      contents: read
++    strategy:
++      matrix:
++        os: [ubuntu-latest]
++
++    steps:
++      - uses: actions/checkout@v5
++        with:
++          submodules: true
++
++      # Used to host cibuildwheel
++      - uses: actions/setup-python@v5
++
++      - name: Install cibuildwheel
++        run: python -m pip install cibuildwheel==3.3.0
++
++      - name: Build wheels
++        run: python -m cibuildwheel --output-dir wheelhouse
++        # to supply options, put them in 'env', like:
++        # env:
++        #   CIBW_SOME_OPTION: value
++        #   ...
++
++      - uses: actions/upload-artifact@v4
++        with:
++          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
++          path: ./wheelhouse/*.whl
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 9276dd3b8..b202e2556 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,6 +1,5 @@
+-cmake_minimum_required(VERSION 3.1)
+-
+-project(ecell4)
++cmake_minimum_required(VERSION 3.14)
++project(ecell4 VERSION 4.0 LANGUAGES C CXX)
+ 
+ set(CMAKE_CXX_STANDARD 11)
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+@@ -51,12 +50,27 @@ else()
+ endif()
+ 
+ find_package(GSL REQUIRED)
+-include_directories({${GSL_INCLUDE_DIRS})
++include_directories(${GSL_INCLUDE_DIRS})
+ 
+-find_package(pybind11)
++# Robust pybind11 handling: use installed pybind11 if available, otherwise fetch it.
++include(FetchContent)
++find_package(pybind11 CONFIG QUIET)
+ if(NOT pybind11_FOUND)
+-    add_subdirectory(pybind11)
++  message(STATUS "pybind11 not found by find_package; fetching pybind11 with FetchContent")
++  FetchContent_Declare(
++    pybind11
++    GIT_REPOSITORY https://github.com/pybind/pybind11.git
++    # Pin a known stable tag; adjust as needed.
++    GIT_TAG v2.11.0
++  )
++  FetchContent_MakeAvailable(pybind11)
++endif()
++
++# Only add subdirectories if they exist, to avoid configure-time failure for packaging contexts.
++if(EXISTS "${CMAKE_SOURCE_DIR}/greens_functions/CMakeLists.txt")
++  add_subdirectory(greens_functions)
++else()
++  message(STATUS "Skipping greens_functions (no CMakeLists.txt found)")
+ endif()
+ 
+-add_subdirectory(greens_functions)
+ add_subdirectory(ecell4)
+diff --git a/appveyor.yml b/appveyor.yml
+deleted file mode 100644
+index 56105ac79..000000000
+--- a/appveyor.yml
++++ /dev/null
+@@ -1,28 +0,0 @@
+-version: '{build}'
+-image: Visual Studio 2017
+-platform:
+-- x64
+-
+-environment:
+-  matrix:
+-    - CONDA_INSTALL_LOCN: "C:\\Miniconda36-x64"
+-    - CONDA_INSTALL_LOCN: "C:\\Miniconda37-x64"
+-
+-init:
+-- call "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
+-- cmd: call %CONDA_INSTALL_LOCN%\Scripts\activate.bat
+-
+-install:
+-- ps: |
+-    git submodule update -q --init --recursive
+-    conda config --set always_yes yes --set changeps1 no
+-    conda update -q conda
+-    conda install -q conda-build anaconda-client conda-verify
+-build_script:
+-- cmd: |
+-    conda build conda.recipe
+-    move %CONDA_INSTALL_LOCN%\conda-bld .
+-    if %APPVEYOR_REPO_TAG%==true anaconda -t %CONDA_UPLOAD_TOKEN% upload conda-bld\win-*\*.tar.bz2
+-artifacts:
+-  - path: 'conda-bld\win-*\*.tar.bz2'
+-  
+diff --git a/azure-pipelines.yml b/azure-pipelines.yml
+deleted file mode 100644
+index 71f65b02a..000000000
+--- a/azure-pipelines.yml
++++ /dev/null
+@@ -1,48 +0,0 @@
+-jobs:
+-- job: Linux
+-  pool:
+-    vmImage: 'ubuntu-18.04'
+-  steps:
+-  - script: echo hello from Linux
+-  - bash: |
+-      git submodule init && git submodule update
+-      sudo apt-get update && sudo apt-get install -y wget bzip2 python3-pip libgsl-dev libboost-dev cmake
+-      sudo python3 -m pip install -U pip setuptools
+-      wget https://support.hdfgroup.org/ftp/HDF5/releases/hdf5-1.10/hdf5-1.10.5/src/hdf5-1.10.5.tar.bz2
+-      tar xf hdf5-1.10.5.tar.bz2 && cd hdf5-1.10.5
+-      ./configure --enable-cxx --prefix=/opt/hdf5 && make && sudo make install
+-      cd ..
+-      export PATH=/opt/hdf5/bin:${PATH}
+-      export LD_LIBRARY_PATH=/opt/hdf5/lib:${LD_LIBRARY_PATH}
+-      export LIBRARY_PATH=/opt/hdf5/lib:${LIBRARY_PATH}
+-      export LD_RUN_PATH=/opt/hdf5/lib:${LD_RUN_PATH}
+-      export INCLUDE_PATH=/opt/hdf5/include:${INCLUDE_PATH}
+-      python3 setup.py build
+-      sudo python3 setup.py install
+-      sudo python3 setup.py test
+-      cd && pwd
+-      python3 -c "from ecell4_base import core"
+-- job: macOS1015
+-  pool:
+-    vmImage: 'macOS-10.15'
+-  steps:
+-  - script: echo hello from macOS 10.15
+-  - bash: |
+-      git submodule init && git submodule update
+-      brew update
+-      brew install boost gsl hdf5@1.10 cmake python
+-      export PATH="/usr/local/opt/hdf5@1.10/bin:${PATH}"
+-      /usr/local/bin/python3 setup.py install
+-      /usr/local/bin/python3 setup.py test
+-- job: macOS1014
+-  pool:
+-    vmImage: 'macOS-10.14'
+-  steps:
+-  - script: echo hello from macOS 10.14
+-  - bash: |
+-      git submodule init && git submodule update
+-      brew update
+-      brew install boost gsl hdf5 cmake python
+-      export PATH="/usr/local/opt/hdf5@1.10/bin:${PATH}"
+-      /usr/local/bin/python3 setup.py install
+-      /usr/local/bin/python3 setup.py test
+diff --git a/ecell4/core/Triangle.cpp b/ecell4/core/Triangle.cpp
+index 119b9480c..ee6c19d75 100644
+--- a/ecell4/core/Triangle.cpp
++++ b/ecell4/core/Triangle.cpp
+@@ -1,4 +1,5 @@
+ #include "Triangle.hpp"
++#include <cstdint>
+ 
+ namespace ecell4
+ {
+diff --git a/greens_functions b/greens_functions
+index 289766ca3..8bfd40190 160000
+--- a/greens_functions
++++ b/greens_functions
+@@ -1 +1 @@
+-Subproject commit 289766ca3d2087ce77324494845169a5d5890d52
++Subproject commit 8bfd401905861002677aaa882c5db91635c8bf7d
+diff --git a/pyproject.toml b/pyproject.toml
+new file mode 100644
+index 000000000..8014b3d75
+--- /dev/null
++++ b/pyproject.toml
+@@ -0,0 +1,23 @@
++# Install system library
++[tool.cibuildwheel.macos]
++# Run multiple commands using an array
++before-all = [
++  "brew install hdf5",
++  "brew install boost",
++  "brew install gsl",
++]
++
++[tool.cibuildwheel.linux]
++before-all = [
++  "yum install hdf5-devel -y",
++  "yum install boost-devel -y",
++  "yum install gsl-devel -y",
++]
++
++[[tool.cibuildwheel.overrides]]
++select = "*-musllinux*"
++before-all = [
++  "apk add gsl-dev",
++  "apk add boost-dev",
++  "apk add hdf5-dev",
++]
+diff --git a/setup.py b/setup.py
+index bfce24dda..0aad5a27f 100644
+--- a/setup.py
++++ b/setup.py
+@@ -106,7 +106,7 @@ def run(self):
+ 
+ setup(
+     name='ecell4_base',
+-    version = '2.1.0',
++    version = '2.1.1',
+     license = "the GNU General Public License v2",
+     author = "Kazunari Kaizu",
+     author_email = "kaizu@riken.jp",

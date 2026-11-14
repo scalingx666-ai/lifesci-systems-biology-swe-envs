@@ -1,0 +1,15 @@
+diff --git a/arFramework3/arCompileAll.m b/arFramework3/arCompileAll.m
+index 54b54ffa..52f2a48c 100644
+--- a/arFramework3/arCompileAll.m
++++ b/arFramework3/arCompileAll.m
+@@ -2918,6 +2918,10 @@ function writeSimuCalcFunctions(debug_mode)
+ 
+         str = strrep( str, total{jm}, fNew );
+     end
++    % because of compatibility with MATLAB2020a and later versions
++    if str2double(ver('MATLAB').Version) >= 9.8
++        str = strrep(str,';',',');
++    end
+     
+ % Safely map derivatives to the appropriate C functions
+ %   pattern replaces D([#], func)(args) to Dfunc(args, floor(#/2)) 

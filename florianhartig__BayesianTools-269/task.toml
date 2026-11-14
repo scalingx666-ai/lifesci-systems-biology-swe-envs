@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/florianhartig__BayesianTools-269"
+description = "Update github action"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "BayesianTools",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "florianhartig/BayesianTools"
+ref = "a7a35f639e2c7a5bb86dd76e07a562888ef425a7"
+reference = "https://github.com/florianhartig/BayesianTools/pull/269"
+source_access = "auto"
+built_at = "2026-11-14T07:01:30.897379+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:9885e66fcffdf346669999f20ab15fe42dfbcc44b2a4fbc46c2f38a3a3d76e5b"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2024-01-24T15:44:12Z"
+diff_format = "unified"
+context_files = [
+    ".github/workflows/R-CMD-check.yaml",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 94
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

@@ -1,0 +1,62 @@
+version = "1.0"
+
+[task]
+name = "default/Vinay0905__Fish-Detection-YOLOv8-2"
+description = "Initialize FastAPI application with root endpoint"
+
+[metadata]
+difficulty = "small"
+category = "bugfix"
+keywords = [
+    "Fish-Detection-YOLOv8",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Vinay0905/Fish-Detection-YOLOv8"
+ref = "30a4a7b1dd5e38e9e0a2c9975736b8c275648463"
+reference = "https://github.com/Vinay0905/Fish-Detection-YOLOv8/pull/2"
+source_access = "auto"
+built_at = "2026-11-14T07:03:23.665736+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:9f029dce4aa66c752ed2e009d944ee014b8dfcd8334681362ae046ba900a7bd3"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-01-16T16:15:10Z"
+diff_format = "unified"
+context_files = [
+    "api.py",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 7
+difficulty = "small"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

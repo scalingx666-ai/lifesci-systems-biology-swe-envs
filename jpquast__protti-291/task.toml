@@ -1,0 +1,70 @@
+version = "1.0"
+
+[task]
+name = "default/jpquast__protti-291"
+description = "Feature/calculate peptide abundance"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "protti",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "jpquast/protti"
+ref = "7286ee2a5865d1f5c1397311eddb95367ac03653"
+reference = "https://github.com/jpquast/protti/pull/291"
+source_access = "auto"
+built_at = "2026-11-14T07:02:57.880626+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:de0e0893b316685cf57a175e481cdcf85fcd8e82b58395c7dcf866d59ca8f126"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-02-23T08:16:08Z"
+diff_format = "unified"
+context_files = [
+    "DESCRIPTION",
+    "NAMESPACE",
+    "NEWS.md",
+    "R/calculate_peptide_abundance.R",
+    "R/fetch_mobidb.R",
+    "README.md",
+    "man/calculate_peptide_abundance.Rd",
+    "man/fetch_mobidb.Rd",
+    "tests/testthat/test-workflow.R",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 456
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

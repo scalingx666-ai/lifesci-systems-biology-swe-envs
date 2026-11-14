@@ -1,0 +1,72 @@
+version = "1.0"
+
+[task]
+name = "default/scverse__mudata-231"
+description = "style: switch to panache markdown formatting"
+
+[metadata]
+difficulty = "medium"
+category = "bugfix"
+keywords = [
+    "mudata",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "scverse/mudata"
+ref = "bf6fa3e51f28cd0ed8cbaee86bd0bffd11a9e518"
+reference = "https://github.com/scverse/mudata/pull/231"
+source_access = "auto"
+built_at = "2026-11-14T07:01:23.616304+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:5a828a75a45dbdf6cf85b7141bccdd191b6d8867d2df1d025b4d0369c3707077"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2026-11-12T17:17:49Z"
+diff_format = "unified"
+context_files = [
+    ".panache.toml",
+    ".pre-commit-config.yaml",
+    "DESIGN.md",
+    "README.md",
+    "biome.jsonc",
+    "docs/changelog.md",
+    "docs/citation.md",
+    "docs/contributing.md",
+    "docs/index.md",
+    "docs/io/input.md",
+    "docs/io/mudata.md",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 74
+difficulty = "medium"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

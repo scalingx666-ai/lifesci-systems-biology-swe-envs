@@ -1,0 +1,84 @@
+diff --git a/.github/workflows/DependabotAutoMerge.yml b/.github/workflows/DependabotAutoMerge.yml
+index 44b814c..e24b444 100644
+--- a/.github/workflows/DependabotAutoMerge.yml
++++ b/.github/workflows/DependabotAutoMerge.yml
+@@ -3,6 +3,9 @@ on: pull_request
+ permissions:
+   contents: write
+   pull-requests: write
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+ jobs:
+   automerge:
+     uses: "SciML/.github/.github/workflows/dependabot-automerge.yml@v1"
+diff --git a/.github/workflows/DocPreviewCleanup.yml b/.github/workflows/DocPreviewCleanup.yml
+index 960a549..5a9486f 100644
+--- a/.github/workflows/DocPreviewCleanup.yml
++++ b/.github/workflows/DocPreviewCleanup.yml
+@@ -4,6 +4,9 @@ on:
+     types: [closed]
+ permissions:
+   contents: write
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+ jobs:
+   cleanup:
+     uses: "SciML/.github/.github/workflows/docs-preview-cleanup.yml@v1"
+diff --git a/.github/workflows/FormatCheck.yml b/.github/workflows/FormatCheck.yml
+index 6825843..4c4443a 100644
+--- a/.github/workflows/FormatCheck.yml
++++ b/.github/workflows/FormatCheck.yml
+@@ -7,6 +7,9 @@ on:
+     tags: '*'
+   pull_request:
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+ jobs:
+   runic:
+     name: "Runic"
+diff --git a/.github/workflows/RunicSuggestions.yml b/.github/workflows/RunicSuggestions.yml
+index 43c0768..50043e7 100644
+--- a/.github/workflows/RunicSuggestions.yml
++++ b/.github/workflows/RunicSuggestions.yml
+@@ -3,6 +3,9 @@ on: pull_request
+ permissions:
+   contents: read
+   pull-requests: write
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+ jobs:
+   runic-suggestions:
+     uses: "SciML/.github/.github/workflows/runic-suggestions-on-pr.yml@v1"
+diff --git a/.github/workflows/SpellCheck.yml b/.github/workflows/SpellCheck.yml
+index 424a06d..e3defe8 100644
+--- a/.github/workflows/SpellCheck.yml
++++ b/.github/workflows/SpellCheck.yml
+@@ -2,6 +2,9 @@ name: Spell Check
+ 
+ on: [pull_request]
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+ jobs:
+   typos-check:
+     name: "Spell Check"
+diff --git a/.github/workflows/benchmark.yml b/.github/workflows/benchmark.yml
+index fa22f1b..926d782 100644
+--- a/.github/workflows/benchmark.yml
++++ b/.github/workflows/benchmark.yml
+@@ -9,6 +9,9 @@ permissions:
+   pull-requests: write
+   contents: read
+ 
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+ jobs:
+   benchmark:
+     runs-on: ubuntu-latest

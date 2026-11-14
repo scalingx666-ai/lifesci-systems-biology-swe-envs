@@ -1,0 +1,64 @@
+version = "1.0"
+
+[task]
+name = "default/Future-House__LAB-Bench-3"
+description = "Mirroring tag fixes"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "LAB-Bench",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "Future-House/LAB-Bench"
+ref = "4c28e0371ae732b80b29cd55220bc179d8c7dd1c"
+reference = "https://github.com/Future-House/LAB-Bench/pull/3"
+source_access = "auto"
+built_at = "2026-11-14T07:01:20.342017+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:061fb6d135b1a711b053c405eddc3c275ed5198e945ca1536cfedf2213e2948e"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2024-08-20T20:14:43Z"
+diff_format = "unified"
+context_files = [
+    "CloningScenarios/cloningscenarios-v1-openanswer.jsonl",
+    "CloningScenarios/cloningscenarios-v1-public.jsonl",
+    "DbQA/gene_location_task-v1-public.jsonl",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 166
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

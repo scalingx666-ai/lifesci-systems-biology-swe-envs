@@ -1,0 +1,70 @@
+version = "1.0"
+
+[task]
+name = "default/dynverse__dyngen-35"
+description = "dyngen 1.0.3"
+
+[metadata]
+difficulty = "large"
+category = "bugfix"
+keywords = [
+    "dyngen",
+    "pr_diff",
+]
+
+[metadata.repo2env]
+pipeline = "pr_diff"
+pipeline_version = "0.3.0"
+repo = "dynverse/dyngen"
+ref = "5d08b2ebbfe0089052068d97f06a9543cb7042a9"
+reference = "https://github.com/dynverse/dyngen/pull/35"
+source_access = "auto"
+built_at = "2026-11-14T07:02:28.206886+00:00"
+reward_kinds = [
+    "diff_similarity",
+]
+spec_version = "0.2.0"
+content_hash = "sha256:07f95390ea5ca30307aad29a32169208c3c4cb5b7bf38ccdda22100385acae5d"
+
+[metadata.repo2env.pr_diff]
+pr_merged_at = "2021-11-30T20:52:48Z"
+diff_format = "unified"
+context_files = [
+    "DESCRIPTION",
+    "NEWS.md",
+    "R/7_experiment.R",
+    "README.Rmd",
+    "README.md",
+    "cran-comments.md",
+    "man/generate_experiment.Rd",
+    "tests/testthat/test-generate_partitions.R",
+    "vignettes/advanced_topics/constructing_backbone.Rmd",
+]
+
+[metadata.repo2env.reward_calibration]
+baseline_reward = 0.0
+loc_changed = 127
+difficulty = "large"
+
+[metadata.repo2env.evaluation]
+schema_version = "1"
+status = "unverified"
+stage = "generation"
+reason_codes = [
+    "validation_not_run",
+]
+detail = "Generated task; validation has not been established."
+provenance = "unknown"
+evidence = []
+
+[metadata.repo2env.reproducibility]
+mode = "local_only"
+image_ref = "python:3.12-slim"
+image_tag = "python:3.12-slim"
+image_visibility = "private"
+
+[agent]
+timeout_sec = 1800.0
+
+[verifier]
+timeout_sec = 300.0

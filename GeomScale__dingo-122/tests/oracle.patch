@@ -1,0 +1,241 @@
+diff --git a/dingo/PolytopeSampler.py b/dingo/PolytopeSampler.py
+index 27f37853..1e3676e6 100644
+--- a/dingo/PolytopeSampler.py
++++ b/dingo/PolytopeSampler.py
+@@ -53,12 +53,12 @@ def get_polytope(self):
+         """
+ 
+         if (
+-            self._A == []
+-            or self._b == []
+-            or self._N == []
+-            or self._N_shift == []
+-            or self._T == []
+-            or self._T_shift == []
++            len(self._A) == 0
++            or len(self._b) == 0
++            or len(self._N) == 0
++            or len(self._N_shift) == 0
++            or len(self._T) == 0
++            or len(self._T_shift) == 0
+         ):
+ 
+             (
+@@ -161,7 +161,8 @@ def generate_steady_states(
+         return steady_states
+ 
+     def generate_steady_states_no_multiphase(
+-        self, method = 'billiard_walk', n=1000, burn_in=0, thinning=1, variance=1.0, bias_vector=None, ess=1000
++        self, method = 'billiard_walk', n=1000, burn_in=0, thinning=1,
++        variance=1.0, bias_vector=None
+     ):
+         """A member function to sample steady states.
+ 
+@@ -171,6 +172,8 @@ def generate_steady_states_no_multiphase(
+         burn_in -- the number of points to burn before sampling
+         thinning -- the walk length of the chain
+         """
++        if method == "mmcs":
++            raise ValueError("method cannot be 'mmcs'. Use generate_steady_states() instead.")
+ 
+         self.get_polytope()
+ 
+@@ -181,7 +184,7 @@ def generate_steady_states_no_multiphase(
+         else:
+             bias_vector = bias_vector.astype('float64')
+ 
+-        samples = P.generate_samples(method.encode('utf-8'), n, burn_in, thinning, variance, bias_vector, self._parameters["solver"], ess)
++        samples = P.generate_samples(method.encode('utf-8'), n, burn_in, thinning, variance, bias_vector, self._parameters["solver"])
+         samples_T = samples.T
+ 
+         steady_states = map_samples_to_steady_states(
+@@ -216,7 +219,7 @@ def sample_from_polytope(
+ 
+     @staticmethod
+     def sample_from_polytope_no_multiphase(
+-        A, b, method = 'billiard_walk', n=1000, burn_in=0, thinning=1, variance=1.0, bias_vector=None, solver=None, ess=1000
++        A, b, method = 'billiard_walk', n=1000, burn_in=0, thinning=1, variance=1.0, bias_vector=None, solver=None
+     ):
+         """A static function to sample from a full dimensional polytope with an MCMC method.
+ 
+@@ -235,7 +238,7 @@ def sample_from_polytope_no_multiphase(
+ 
+         P = HPolytope(A, b)
+ 
+-        samples = P.generate_samples(method.encode('utf-8'), n, burn_in, thinning, variance, bias_vector, solver, ess)
++        samples = P.generate_samples(method.encode('utf-8'), n, burn_in, thinning, variance, bias_vector, solver)
+ 
+         samples_T = samples.T
+         return samples_T
+diff --git a/dingo/bindings/bindings.cpp b/dingo/bindings/bindings.cpp
+index cbdb1246..3f2c1a55 100644
+--- a/dingo/bindings/bindings.cpp
++++ b/dingo/bindings/bindings.cpp
+@@ -91,8 +91,7 @@ double HPolytopeCPP::apply_sampling(int walk_len,
+                                     double radius,
+                                     double* samples,
+                                     double variance_value,
+-                                    double* bias_vector_,
+-                                    int ess){
++                                    double* bias_vector_){
+ 
+    RNGType rng(HP.dimension());
+    HP.normalize();
+@@ -134,13 +133,6 @@ double HPolytopeCPP::apply_sampling(int walk_len,
+    } else if (strcmp(method, "vaidya_walk") == 0) { // vaidya walk
+       uniform_sampling<VaidyaWalk>(rand_points, HP, rng, walk_len, number_of_points,
+                                    starting_point, number_of_points_to_burn);
+-   } else if (strcmp(method, "mmcs") == 0) { // vaidya walk
+-      MT S;
+-      int total_ess;
+-      //TODO: avoid passing polytopes as non-const references
+-      const Hpolytope HP_const = HP;
+-      mmcs(HP_const, ess, S, total_ess, walk_len, rng);
+-      samples = S.data();
+    } else if (strcmp(method, "gaussian_hmc_walk") == 0) { // Gaussian sampling with exact HMC walk
+       NT a = NT(1)/(NT(2)*variance);
+       gaussian_sampling<GaussianHamiltonianMonteCarloExactWalk>(rand_points, HP, rng, walk_len, number_of_points, a,
+@@ -170,14 +162,12 @@ double HPolytopeCPP::apply_sampling(int walk_len,
+       throw std::runtime_error("This function must not be called.");
+    }
+ 
+-   if (strcmp(method, "mmcs") != 0) {
+-    // The following block of code allows us to copy the sampled points
+-    auto n_si=0;
+-    for (auto it_s = rand_points.cbegin(); it_s != rand_points.cend(); it_s++){
+-        for (auto i = 0; i != it_s->dimension(); i++){
+-            samples[n_si++] = (*it_s)[i];
+-        }
+-    }
++   // The following block of code allows us to copy the sampled points
++   auto n_si=0;
++   for (auto it_s = rand_points.cbegin(); it_s != rand_points.cend(); it_s++){
++      for (auto i = 0; i != it_s->dimension(); i++){
++         samples[n_si++] = (*it_s)[i];
++      }
+    }
+    return 0.0;
+ }
+diff --git a/dingo/bindings/bindings.h b/dingo/bindings/bindings.h
+index 553ea99e..91d323ec 100644
+--- a/dingo/bindings/bindings.h
++++ b/dingo/bindings/bindings.h
+@@ -141,7 +141,7 @@ class HPolytopeCPP{
+       // the apply_sampling() function
+       double apply_sampling(int walk_len, int number_of_points, int number_of_points_to_burn,
+                             char* method, double* inner_point, double radius, double* samples,
+-                            double variance_value, double* bias_vector, int ess);
++                            double variance_value, double* bias_vector);
+ 
+       void mmcs_initialize(int d, int ess, bool psrf_check, bool parallelism, int num_threads);
+ 
+diff --git a/dingo/volestipy.pyx b/dingo/volestipy.pyx
+index 6e8d3a98..0c747425 100644
+--- a/dingo/volestipy.pyx
++++ b/dingo/volestipy.pyx
+@@ -55,7 +55,7 @@ cdef extern from "bindings.h":
+       # Random sampling
+       double apply_sampling(int walk_len, int number_of_points, int number_of_points_to_burn, \
+                             char* method, double* inner_point, double radius, double* samples, \
+-                            double variance_value, double* bias_vector, int ess)
++                            double variance_value, double* bias_vector)
+ 
+       # Initialize the parameters for the (m)ultiphase (m)onte (c)arlo (s)ampling algorithm
+       void mmcs_initialize(unsigned int d, int ess, int psrf_check, int parallelism, int num_threads);
+@@ -119,7 +119,7 @@ cdef class HPolytope:
+ 
+    # Likewise, the generate_samples() function
+    def generate_samples(self, method, number_of_points, number_of_points_to_burn, walk_len,
+-                        variance_value, bias_vector, solver = None, ess = 1000):
++                        variance_value, bias_vector, solver = None):
+ 
+       n_variables = self._A.shape[1]
+       cdef double[:,::1] samples = np.zeros((number_of_points, n_variables), dtype = np.float64, order = "C")
+@@ -133,7 +133,7 @@ cdef class HPolytope:
+ 
+       self.polytope_cpp.apply_sampling(walk_len, number_of_points, number_of_points_to_burn, \
+                                        method, &inner_point_for_c[0], radius, &samples[0,0], \
+-                                       variance_value, &bias_vector_[0], ess)
++                                       variance_value, &bias_vector_[0])
+       return np.asarray(samples)
+ 
+ 
+diff --git a/tests/sampling_no_multiphase.py b/tests/sampling_no_multiphase.py
+index 86e304f3..705cf61f 100644
+--- a/tests/sampling_no_multiphase.py
++++ b/tests/sampling_no_multiphase.py
+@@ -2,7 +2,7 @@
+ # dingo is part of GeomScale project
+ 
+ # Copyright (c) 2022 Apostolos Chalkis
+-# Copyright (c) 2022 Vissarion Fisikopoulos
++# Copyright (c) 2022-2025 Vissarion Fisikopoulos
+ # Copyright (c) 2022 Haris Zafeiropoulos
+ # Copyright (c) 2024 Ke Shi
+ 
+@@ -11,41 +11,33 @@
+ import unittest
+ import os
+ import sys
++import numpy as np
+ from dingo import MetabolicNetwork, PolytopeSampler
+ from dingo.pyoptinterface_based_impl import set_default_solver
+ 
++def test_shape_and_non_zero(steady_states, shape0, shape1, testing_class):
++    testing_class.assertTrue( steady_states.shape[0] == shape0 )
++    testing_class.assertTrue( steady_states.shape[1] == shape1 )
++    testing_class.assertTrue( np.any(np.abs(steady_states) > 1e-12) )
++
+ def sampling(model, testing_class):
+     sampler = PolytopeSampler(model)
+ 
+     #Gaussian hmc sampling
+-    steady_states = sampler.generate_steady_states_no_multiphase(method = 'mmcs', ess=1000)
+-
+-    testing_class.assertTrue( steady_states.shape[0] == 95 )
+-    testing_class.assertTrue( steady_states.shape[1] == 1000 )
+-
+-    #Gaussian hmc sampling
+-    steady_states = sampler.generate_steady_states_no_multiphase(method = 'gaussian_hmc_walk', n=500)
+-
+-    testing_class.assertTrue( steady_states.shape[0] == 95 )
+-    testing_class.assertTrue( steady_states.shape[1] == 500 )
++    steady_states = sampler.generate_steady_states_no_multiphase(method = 'gaussian_hmc_walk', n=1000)
++    test_shape_and_non_zero(steady_states, 95, 1000, testing_class)
+ 
+     #exponential hmc sampling
+-    steady_states = sampler.generate_steady_states_no_multiphase(method = 'exponential_hmc_walk', n=500, variance=50)
+-
+-    testing_class.assertTrue( steady_states.shape[0] == 95 )
+-    testing_class.assertTrue( steady_states.shape[1] == 500 )
+-
++    steady_states = sampler.generate_steady_states_no_multiphase(method = 'exponential_hmc_walk', n=1000, variance=50)
++    test_shape_and_non_zero(steady_states, 95, 1000, testing_class)
++    
+     #hmc sampling with Gaussian distribution
+-    steady_states = sampler.generate_steady_states_no_multiphase(method = 'hmc_leapfrog_gaussian', n=500)
+-
+-    testing_class.assertTrue( steady_states.shape[0] == 95 )
+-    testing_class.assertTrue( steady_states.shape[1] == 500 )
++    steady_states = sampler.generate_steady_states_no_multiphase(method = 'hmc_leapfrog_gaussian', n=1000)
++    test_shape_and_non_zero(steady_states, 95, 1000, testing_class)
+ 
+     #hmc sampling with exponential distribution
+-    steady_states = sampler.generate_steady_states_no_multiphase(method = 'hmc_leapfrog_exponential', n=500, variance=50)
+-
+-    testing_class.assertTrue( steady_states.shape[0] == 95 )
+-    testing_class.assertTrue( steady_states.shape[1] == 500 )
++    steady_states = sampler.generate_steady_states_no_multiphase(method = 'hmc_leapfrog_exponential', n=1000, variance=50)
++    test_shape_and_non_zero(steady_states, 95, 1000, testing_class)
+ 
+     #steady_states[12].mean() seems to have a lot of discrepancy between experiments, so we won't check the mean for now
+     #self.assertTrue( abs( steady_states[12].mean()  - 2.504 ) < 1e-03 )
+@@ -70,8 +62,6 @@ def test_sample_sbml(self):
+         model = MetabolicNetwork.from_sbml( input_file_sbml )
+         sampling(model, self)
+ 
+-
+-
+ if __name__ == "__main__":
+     if len(sys.argv) > 1:
+         set_default_solver(sys.argv[1])

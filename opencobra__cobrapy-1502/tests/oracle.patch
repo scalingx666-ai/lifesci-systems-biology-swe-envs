@@ -1,0 +1,81 @@
+diff --git a/release-notes/next-release.md b/release-notes/next-release.md
+index 28a3b3745..494e03208 100644
+--- a/release-notes/next-release.md
++++ b/release-notes/next-release.md
+@@ -16,6 +16,7 @@
+ - fixed the URL for the BioModels repository
+ - `write_sbml_model` no longer fails with a libSBML `TypeError` when reaction bounds or stoichiometries are numpy scalars.
+ - gene ids containing characters such as `@`, `+`, `*` or `#` are now parsed correctly in GPRs, so reactions using them can be copied (#1448)
++- adding a reaction that already belongs to another model copies it, so changing the new reaction no longer changes the source model (#1456)
+ 
+ ## Other
+ 
+diff --git a/src/cobra/core/model.py b/src/cobra/core/model.py
+index 8c2d26429..5d05eaaab 100644
+--- a/src/cobra/core/model.py
++++ b/src/cobra/core/model.py
+@@ -691,7 +691,8 @@ def add_reactions(self, reaction_list: Iterable[Reaction]) -> None:
+         """Add reactions to the model.
+ 
+         Reactions with identifiers identical to a reaction already in the
+-        model are ignored.
++        model are ignored. A reaction that already belongs to another model
++        is copied first, so the source model keeps its own reaction.
+ 
+         The change is reverted upon exit when using the model as a context.
+ 
+@@ -721,6 +722,16 @@ def existing_filter(rxn: Reaction) -> bool:
+ 
+         # First check whether the reactions exist in the model.
+         pruned = DictList(filter(existing_filter, reaction_list))
++        # The reaction object stores its model. Reusing one that already
++        # belongs elsewhere would move it out of that model.
++        pruned = DictList(
++            (
++                reaction.copy()
++                if reaction._model is not None and reaction._model is not self
++                else reaction
++            )
++            for reaction in pruned
++        )
+ 
+         context = get_context(self)
+ 
+diff --git a/tests/test_core/test_model.py b/tests/test_core/test_model.py
+index c29a67ef6..18a7f77fa 100644
+--- a/tests/test_core/test_model.py
++++ b/tests/test_core/test_model.py
+@@ -1017,6 +1017,33 @@ def test_add_reactions_duplicate(model: Model) -> None:
+     assert r2 is not model.reactions.get_by_id(rxn.id)
+ 
+ 
++def test_add_reaction_from_other_model_is_copied() -> None:
++    """Test that a reaction already in a model is copied, not aliased."""
++    source = Model("M1")
++    reaction = Reaction("R1")
++    reaction.add_metabolites({Metabolite("A"): -1, Metabolite("B"): 1})
++    reaction.gene_reaction_rule = "gene_a"
++    source.add_reactions([reaction])
++    original_bounds = source.reactions.R1.bounds
++
++    destination = Model("M2")
++    with destination:
++        destination.add_reactions(source.reactions)
++        added = destination.reactions.R1
++        assert added is not source.reactions.R1
++        assert added.model is destination
++        assert source.reactions.R1.model is source
++        added.bounds = (500, 600)
++        assert source.reactions.R1.bounds == original_bounds
++        assert added.gene_reaction_rule == "gene_a"
++        assert {gene.id for gene in added.genes} == {"gene_a"}
++        assert all(gene.model is destination for gene in added.genes)
++        assert all(gene.model is source for gene in source.reactions.R1.genes)
++    assert "R1" not in destination.reactions
++    assert source.reactions.R1.model is source
++    assert source.reactions.R1.bounds == original_bounds
++
++
+ def test_all_objects_point_to_all_other_correct_objects(model: Model) -> None:
+     """Test that objects point to needed other objects.
+ 

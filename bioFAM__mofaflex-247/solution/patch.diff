@@ -1,0 +1,48 @@
+diff --git a/.github/workflows/build.yaml b/.github/workflows/build.yaml
+index 2afd646..b1ef116 100644
+--- a/.github/workflows/build.yaml
++++ b/.github/workflows/build.yaml
+@@ -29,7 +29,7 @@ jobs:
+           fetch-depth: 0
+           persist-credentials: false
+       - name: Install uv
+-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
++        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+       - name: Build package
+         run: uv build
+       - name: Check package
+diff --git a/.github/workflows/release.yaml b/.github/workflows/release.yaml
+index b1bf163..d009276 100644
+--- a/.github/workflows/release.yaml
++++ b/.github/workflows/release.yaml
+@@ -26,7 +26,7 @@ jobs:
+           fetch-depth: 0
+           persist-credentials: false
+       - name: Install uv
+-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
++        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+         with:
+           enable-cache: false
+       - name: Build package
+diff --git a/.github/workflows/test.yaml b/.github/workflows/test.yaml
+index c5b6930..65c9c35 100644
+--- a/.github/workflows/test.yaml
++++ b/.github/workflows/test.yaml
+@@ -36,7 +36,7 @@ jobs:
+           fetch-depth: 0
+           persist-credentials: false
+       - name: Install uv
+-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
++        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+       - name: Get test environments
+         id: get-envs
+         run: |
+@@ -75,7 +75,7 @@ jobs:
+           fetch-depth: 0
+           persist-credentials: false
+       - name: Install uv
+-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
++        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+         with:
+           python-version: ${{ matrix.env.python }}
+       - name: create hatch environment
